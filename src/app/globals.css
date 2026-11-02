@@ -1,0 +1,217 @@
+@import "tailwindcss";
+
+/*
+ * Traccoon master theme for PayAgent. Single source of truth for design values.
+ * Based on traccoon-design-skill/examples/tokens.css. Literal colors live ONLY here.
+ * Components consume the semantic --tr-color-* roles or the Tailwind names mapped below.
+ */
+:root {
+  --tr-font-ui: var(--font-nunito), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --tr-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace; /* technical values only: hashes, IDs */
+
+  --tr-brand-charcoal: #262221;
+  --tr-brand-cream: #f3ede8;
+  --tr-brand-paper: #fffcf9;
+  --tr-brand-outline: #62534a;
+  --tr-brand-border: #d3c2b8;
+  --tr-brand-muted: #c7b4a5;
+  --tr-brand-success: #2f6b3a;
+  --tr-brand-success-bg: #e3efe1;
+  --tr-brand-warning: #7a4d05;
+  --tr-brand-warning-bg: #f7e9cf;
+  --tr-brand-danger: #9b2c22;
+  --tr-brand-danger-bg: #f6dfdb;
+
+  --tr-space-1: 0.25rem;
+  --tr-space-2: 0.5rem;
+  --tr-space-3: 0.75rem;
+  --tr-space-4: 1rem;
+  --tr-space-5: 1.25rem;
+  --tr-space-6: 1.5rem;
+  --tr-space-8: 2rem;
+  --tr-space-12: 3rem;
+  --tr-radius-input: 0.375rem;
+  --tr-radius-sm: 0.5rem;
+  --tr-radius-control: 0.75rem;
+  --tr-radius-card: 1rem;
+  --tr-radius-pill: 999px;
+  --tr-stroke-hairline: 1px;
+  --tr-stroke-control: 2px;
+  --tr-stroke-card: 2px;
+  --tr-control-min-target: 44px;
+  --tr-font-button-size: 1rem;
+  --tr-font-button-weight: 700;
+  --tr-font-button-leading: 1.25;
+  --tr-focus-stroke: 3px;
+  --tr-focus-offset: 4px;
+  --tr-disabled-opacity: 0.75;
+  --tr-button-shadow-distance: 4px;
+  --tr-button-press-distance: 3px;
+  --tr-card-shadow: 0 8px 22px -14px rgb(38 34 33 / 0.25);
+  --tr-motion-fast: 130ms;
+  --tr-motion-base: 200ms;
+  --tr-motion-ease: ease-out;
+  --tr-measure: 42rem;
+  --tr-measure-wide: 72rem;
+}
+
+/* Authenticated workflow theme (PayAgent is an app, so this is the default). */
+:root,
+[data-tr-theme="app"] {
+  --tr-color-page: var(--tr-brand-cream);
+  --tr-color-surface: var(--tr-brand-paper);
+  --tr-color-text: var(--tr-brand-charcoal);
+  --tr-color-text-muted: var(--tr-brand-outline);
+  --tr-color-border: var(--tr-brand-border);
+  --tr-color-control-border: var(--tr-brand-outline);
+  --tr-color-control-shadow: var(--tr-brand-outline);
+  --tr-color-action: var(--tr-brand-charcoal);
+  --tr-color-on-action: var(--tr-brand-paper);
+  --tr-color-action-hover: var(--tr-brand-outline);
+  --tr-color-disabled: var(--tr-brand-muted);
+  --tr-color-on-disabled: var(--tr-brand-charcoal);
+  --tr-color-focus: var(--tr-brand-charcoal);
+  --tr-color-success: var(--tr-brand-success);
+  --tr-color-success-bg: var(--tr-brand-success-bg);
+  --tr-color-warning: var(--tr-brand-warning);
+  --tr-color-warning-bg: var(--tr-brand-warning-bg);
+  --tr-color-danger: var(--tr-brand-danger);
+  --tr-color-danger-bg: var(--tr-brand-danger-bg);
+}
+
+/* Tailwind utility names mapped to semantic tokens (bg-page, text-muted, border-line, ...). */
+@theme inline {
+  --font-sans: var(--tr-font-ui);
+  --font-mono: var(--tr-font-mono);
+  --color-page: var(--tr-color-page);
+  --color-surface: var(--tr-color-surface);
+  --color-ink: var(--tr-color-text);
+  --color-muted: var(--tr-color-text-muted);
+  --color-line: var(--tr-color-border);
+  --color-action: var(--tr-color-action);
+  --color-on-action: var(--tr-color-on-action);
+  --color-success: var(--tr-color-success);
+  --color-success-bg: var(--tr-color-success-bg);
+  --color-warning: var(--tr-color-warning);
+  --color-warning-bg: var(--tr-color-warning-bg);
+  --color-danger: var(--tr-color-danger);
+  --color-danger-bg: var(--tr-color-danger-bg);
+  --radius-input: var(--tr-radius-input);
+  --radius-control: var(--tr-radius-control);
+  --radius-card: var(--tr-radius-card);
+  --max-width-measure: var(--tr-measure);
+  --max-width-wide: var(--tr-measure-wide);
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    background: var(--tr-color-page);
+    color: var(--tr-color-text);
+    font-family: var(--tr-font-ui);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  ::selection {
+    background: var(--tr-color-text);
+    color: var(--tr-color-surface);
+  }
+  :focus-visible {
+    outline: var(--tr-focus-stroke) solid var(--tr-color-focus);
+    outline-offset: var(--tr-focus-offset);
+  }
+}
+
+/* Shared component recipes. Only the components in src/components/ui use these classes. */
+@layer components {
+  .tr-surface {
+    background: var(--tr-color-surface);
+    color: var(--tr-color-text);
+    border: var(--tr-stroke-card) solid var(--tr-color-border);
+    border-radius: var(--tr-radius-card);
+    box-shadow: var(--tr-card-shadow);
+  }
+
+  .tr-button {
+    appearance: none;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--tr-space-2);
+    min-block-size: var(--tr-control-min-target);
+    min-inline-size: var(--tr-control-min-target);
+    padding: var(--tr-space-3) var(--tr-space-5);
+    font: var(--tr-font-button-weight) var(--tr-font-button-size) / var(--tr-font-button-leading) var(--tr-font-ui);
+    text-align: center;
+    text-decoration: none;
+    color: var(--tr-color-on-action);
+    background: var(--tr-color-action);
+    border: var(--tr-stroke-control) solid var(--tr-color-control-border);
+    border-radius: var(--tr-radius-control);
+    box-shadow: 0 var(--tr-button-shadow-distance) 0 var(--tr-color-control-shadow);
+    cursor: pointer;
+    transition:
+      transform var(--tr-motion-fast) var(--tr-motion-ease),
+      box-shadow var(--tr-motion-fast) var(--tr-motion-ease),
+      background var(--tr-motion-fast) var(--tr-motion-ease);
+  }
+  .tr-button:not(:disabled):not([aria-disabled="true"]):hover {
+    background: var(--tr-color-action-hover);
+  }
+  .tr-button:not(:disabled):not([aria-disabled="true"]):active {
+    transform: translateY(var(--tr-button-press-distance));
+    box-shadow: 0 calc(var(--tr-button-shadow-distance) - var(--tr-button-press-distance)) 0 var(--tr-color-control-shadow);
+  }
+  .tr-button:disabled,
+  .tr-button[aria-disabled="true"] {
+    color: var(--tr-color-on-disabled);
+    background: var(--tr-color-disabled);
+    opacity: var(--tr-disabled-opacity);
+    box-shadow: none;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .tr-button[aria-busy="true"] {
+    cursor: progress;
+  }
+  .tr-button--secondary {
+    color: var(--tr-color-text);
+    background: var(--tr-color-surface);
+  }
+  .tr-button--secondary:not(:disabled):not([aria-disabled="true"]):hover {
+    background: var(--tr-color-page);
+  }
+
+  .tr-input {
+    inline-size: 100%;
+    min-block-size: var(--tr-control-min-target);
+    padding: var(--tr-space-2) var(--tr-space-3);
+    font: inherit;
+    color: var(--tr-color-text);
+    background: var(--tr-color-surface);
+    border: var(--tr-stroke-control) solid var(--tr-color-border);
+    border-radius: var(--tr-radius-control);
+    transition: border-color var(--tr-motion-base) var(--tr-motion-ease);
+  }
+  .tr-input:hover {
+    border-color: var(--tr-color-control-border);
+  }
+  .tr-input[aria-invalid="true"] {
+    border-color: var(--tr-color-danger);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  .tr-button:not(:disabled):active {
+    transform: none;
+  }
+}
