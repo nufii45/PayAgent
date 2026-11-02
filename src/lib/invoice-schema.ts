@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { parseAmount } from "./money";
-import { resolveDueDate, type IsoDate } from "./dates";
+import { formatDate, resolveDueDate, type IsoDate } from "./dates";
 
 /** What the model is allowed to return. Raw strings and tokens only: no maths. */
 export const InvoiceProposal = z.object({
@@ -69,7 +69,7 @@ export function proposalToDraft(proposal: InvoiceProposal, now: Date = new Date(
     notes: proposal.notes,
   };
   if (due.needsConfirmation) {
-    return { status: "needs_confirmation", draft, question: `Should the due date be ${due.date}?` };
+    return { status: "needs_confirmation", draft, question: `"${proposal.dueDateToken!.replace(/_/g, " ")}" can mean different days. I used ${formatDate(due.date)}.` };
   }
   return { status: "ready", draft };
 }

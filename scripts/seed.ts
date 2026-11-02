@@ -38,7 +38,9 @@ async function main() {
   console.log(`Seeded 3 clients and ${created.length} invoices: ${created.map((i) => i.number).join(", ")}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

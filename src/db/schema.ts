@@ -41,6 +41,8 @@ export const agentRequests = pgTable("agent_requests", {
   proposal: jsonb("proposal"),
   validationResult: jsonb("validation_result"),
   latencyMs: integer("latency_ms"),
+  // Full conversation sent to the agent (user turns and follow-up answers).
+  conversation: jsonb("conversation"),
   createdAt: createdAt(),
 });
 
@@ -60,7 +62,10 @@ export const invoices = pgTable(
     dueDate: date("due_date", { mode: "string" }).notNull(),
     status: invoiceStatus("status").notNull().default("approved"),
     notes: text("notes"),
-    createdFromRequestId: uuid("created_from_request_id").references(() => agentRequests.id),
+    // Unique: one request can create at most one invoice, so double-clicking Approve is harmless.
+    createdFromRequestId: uuid("created_from_request_id")
+      .unique()
+      .references(() => agentRequests.id),
     createdAt: createdAt(),
   },
   (t) => [index("invoices_client_idx").on(t.clientId)],
@@ -77,8 +82,10 @@ export const invoiceItems = pgTable("invoice_items", {
 
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // Unique: each request is decided once.
   requestId: uuid("request_id")
     .notNull()
+    .unique()
     .references(() => agentRequests.id),
   action: approvalAction("action").notNull(),
   edits: jsonb("edits"),

@@ -62,19 +62,19 @@ Every task needed to finish the app and all three submissions. Scope comes from 
 
 - [ ] **T1.5** `ModelProvider` interface with a Meta Model API implementation (Muse Spark, with tool calling and image input): server-only, timeout, one retry on network error, logs model name and latency. *Done when:* a smoke script returns a completion and a tool call.
 - [ ] **T1.5a** Baseten implementation of `ModelProvider` using `meta-models/muse-spark-open-1026` (not `muse-spark-open`), selected by `MODEL_PROVIDER` env var. P1: skip if Baseten credits haven't arrived by 4 Nov noon.
-- [ ] **T1.6** Invoice extraction prompt: system prompt with today's date and timezone, schema description, rules (never compute amounts or dates, return tokens; list missing fields; ask one question). Treat user text as data.
-- [ ] **T1.6a** Agent tools (deterministic, server-side): `find_client(name)`, `parse_amount(text)` (wraps T1.1), `resolve_due_date(token)` (wraps T1.2), `list_open_invoices(client)`. The model calls these instead of doing maths. Every tool call is written to the audit log. This is what makes it an agent, not an extractor (Best Agentic Use-Case, Use of Meta tooling).
-- [ ] **T1.7** `proposeInvoice(input)`: run the agent loop (max 5 tool calls), parse the final JSON, validate with Zod, on failure retry once with the validation error, then fail cleanly. Writes an `agent_requests` row and audit event for every attempt. *Done when:* integration test with a mocked model covers success, invalid JSON then success, and double failure.
-- [ ] **T1.8** Missing-info loop (F2): if the proposal lists missing fields or the date needs confirmation, return one question; the answer is appended to the conversation and re-proposed. *Done when:* "Invoice Client A for consulting" asks for the amount, and answering produces a full draft.
+- [x] **T1.6** Invoice extraction prompt: system prompt with today's date and timezone, schema description, rules (never compute amounts or dates, return tokens; list missing fields; ask one question). Treat user text as data.
+- [x] **T1.6a** Agent tools (deterministic, server-side): `find_client(name)`, `parse_amount(text)` (wraps T1.1), `resolve_due_date(token)` (wraps T1.2), `list_open_invoices(client)`. The model calls these instead of doing maths. Every tool call is written to the audit log. This is what makes it an agent, not an extractor (Best Agentic Use-Case, Use of Meta tooling).
+- [x] **T1.7** `proposeInvoice(input)`: run the agent loop (max 5 tool calls), parse the final JSON, validate with Zod, on failure retry once with the validation error, then fail cleanly. Writes an `agent_requests` row and audit event for every attempt. *Done when:* integration test with a mocked model covers success, invalid JSON then success, and double failure.
+- [x] **T1.8** Missing-info loop (F2): if the proposal lists missing fields or the date needs confirmation, return one question; the answer is appended to the conversation and re-proposed. *Done when:* "Invoice Client A for consulting" asks for the amount, and answering produces a full draft.
 - [ ] **T1.9** Eval set `evals/invoice-cases.json` with 15 inputs (English, Filipino, Taglish, missing fields, ambiguous dates, odd amount formats) and expected drafts. `pnpm eval` runs them against the real model and prints pass rate, per provider. *Done when:* pass rate ≥ 90% on Muse Spark, or failures are fixed in the prompt. Record the Spark Open pass rate too; submit for the open-weight prize only if it is close.
 
 ### 1.3 Screens (F3, F4, F5)
 
-- [ ] **T1.10** New request screen: one input box (text), submit, loading state, follow-up question rendering. Copy follows the Traccoon writing rules.
-- [ ] **T1.11** Review and approval screen (F3): editable invoice card beside the original input; field-level validation; Approve and Reject. *Done when:* no `invoices` row exists before Approve (verified by test), edits are saved to `approvals.edits_json`.
-- [ ] **T1.12** Approve action: server-side re-validation, creates invoice + items in one transaction, writes approval and audit events. Double-submit safe.
-- [ ] **T1.13** Invoice list (F4): client, amount in ₱, due date, status badge; empty state with one action.
-- [ ] **T1.14** Invoice detail with audit timeline (F5): input, each agent tool call and result, proposal (model + latency), validation, edits, approval, outcome.
+- [x] **T1.10** New request screen: one input box (text), submit, loading state, follow-up question rendering. Copy follows the Traccoon writing rules.
+- [x] **T1.11** Review and approval screen (F3): editable invoice card beside the original input; field-level validation; Approve and Reject. *Done when:* no `invoices` row exists before Approve (verified by test), edits are saved to `approvals.edits_json`.
+- [x] **T1.12** Approve action: server-side re-validation, creates invoice + items in one transaction, writes approval and audit events. Double-submit safe.
+- [x] **T1.13** Invoice list (F4): client, amount in ₱, due date, status badge; empty state with one action.
+- [x] **T1.14** Invoice detail with audit timeline (F5): input, each agent tool call and result, proposal (model + latency), validation, edits, approval, outcome.
 - [ ] **T1.15** Error states: model timeout, invalid output after retry, DB error. Each says what happened and what to do next.
 - [ ] **T1.16** Mobile pass on all screens at 360/390/430px.
 
