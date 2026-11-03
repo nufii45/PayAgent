@@ -10,6 +10,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -33,8 +34,64 @@ export const clients = pgTable("clients", {
   createdAt: createdAt(),
 });
 
+export const evidenceKind = pgEnum("evidence_kind", ["image", "text"]);
+
+// One business case: a conversation the user wants reconstructed.
+export const investigations = pgTable("investigations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  instruction: text("instruction"),
+  // The user's corrections, kept apart from the evidence and the model's reading.
+  corrections: jsonb("corrections").notNull().default(sql`'{}'::jsonb`),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const evidenceSources = pgTable(
+  "evidence_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    investigationId: uuid("investigation_id")
+      .notNull()
+      .references(() => investigations.id, { onDelete: "cascade" }),
+    kind: evidenceKind("kind").notNull(),
+    label: text("label").notNull(),
+    position: integer("position").notNull(),
+    textContent: text("text_content"),
+    imageDataUrl: text("image_data_url"),
+    // Same file uploaded twice to one investigation is rejected.
+    contentHash: text("content_hash").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("evidence_hash_uq").on(t.investigationId, t.contentHash), index("evidence_inv_idx").on(t.investigationId, t.position)],
+);
+
+// Every analysis is kept. Reanalysis adds a version and never overwrites one.
+export const analysisVersions = pgTable(
+  "analysis_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    investigationId: uuid("investigation_id")
+      .notNull()
+      .references(() => investigations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    trigger: text("trigger").notNull(), // initial | new_evidence | correction | reorder
+    // Evidence used, in order, with the E1/E2 labels the model saw.
+    evidence: jsonb("evidence").notNull(),
+    extraction: jsonb("extraction"),
+    analysis: jsonb("analysis"),
+    corrections: jsonb("corrections"),
+    model: text("model"),
+    latencyMs: integer("latency_ms"),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("analysis_version_uq").on(t.investigationId, t.version)],
+);
+
 export const agentRequests = pgTable("agent_requests", {
   id: uuid("id").primaryKey().defaultRandom(),
+  investigationId: uuid("investigation_id").references(() => investigations.id, { onDelete: "set null" }),
   inputType: inputType("input_type").notNull(),
   rawInput: text("raw_input").notNull(),
   model: text("model").notNull(),

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { describeStep } from "@/lib/describe-step";
@@ -51,6 +52,8 @@ function TimelineEntry({ eventType, payload }: { eventType: string; payload: Pay
         </p>
       );
     }
+    case "action.invoice_drafted":
+      return <p className="font-bold">Drafted from investigation analysis v{String(p.version)}</p>;
     case "invoice.created":
       return <p className="font-bold">Invoice {String(p.number)} saved</p>;
     default:
@@ -63,11 +66,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const data = await getInvoiceWithTimeline(db, id);
   if (!data) notFound();
-  const { invoice, items, timeline } = data;
+  const { invoice, items, timeline, request } = data;
+  const source = (request?.validationResult as { source?: { investigationId: string; version: number } } | null)?.source;
 
   return (
     <div className="flex flex-col gap-6">
-      <ReturnLink href="/" label="invoices" />
+      <ReturnLink href="/invoices" label="invoices" />
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-3xl font-extrabold">Invoice {invoice.number}</h1>
         <StatusBadge status={invoice.status} />
@@ -107,6 +111,15 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             </tbody>
           </table>
           {invoice.notes && <p className="text-muted">{invoice.notes}</p>}
+          {source && request?.investigationId && (
+            <p className="text-sm">
+              Every line comes from{" "}
+              <Link className="font-bold underline" href={`/investigations/${source.investigationId}?v=${source.version}`}>
+                investigation analysis v{source.version}
+              </Link>
+              , where each amount links to the message that supports it.
+            </p>
+          )}
         </Card>
 
         <Card className="flex flex-col gap-4">
