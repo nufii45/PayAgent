@@ -17,6 +17,7 @@ export function parseAmount(input: string): ParseAmountResult {
     .trim()
     .toLowerCase()
     // Currency marks only; the currency itself is decided separately.
+    .replace(/^\+\s*/, "") // "+2,000" as in "drone shots, +2,000"
     .replace(/^(₱|php|p|\$|usd|us\$)\s*/, "")
     .replace(/\s*(php|pesos?|usd|dollars?)$/, "")
     .trim();

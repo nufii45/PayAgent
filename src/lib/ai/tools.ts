@@ -76,7 +76,7 @@ export async function runTool(name: string, rawArgs: string, deps: ToolDeps): Pr
 
   switch (name) {
     case "find_client": {
-      const matches = await deps.findClient(str("name"));
+      const matches = await deps.findClient(cleanClientName(str("name")));
       return matches.length ? { matches: matches.map((m) => ({ name: m.name, email: m.email })) } : { matches: [], note: "New client" };
     }
     case "parse_amount": {
@@ -94,4 +94,9 @@ export async function runTool(name: string, rawArgs: string, deps: ToolDeps): Pr
     default:
       return { error: `Unknown tool ${name}` };
   }
+}
+
+/** Drop leading words that aren't part of a name: "the bakery" → "bakery", "kay Maria" → "Maria". */
+export function cleanClientName(name: string): string {
+  return name.trim().replace(/^(?:(?:the|si|sina|kay|kina|ni|nina|para|sa)\s+)+/i, "").trim() || name.trim();
 }

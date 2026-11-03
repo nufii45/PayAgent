@@ -60,13 +60,13 @@ Every task needed to finish the app and all three submissions. Scope comes from 
 
 ### 1.2 Meta model integration (F1, F2)
 
-- [ ] **T1.5** `ModelProvider` interface with a Meta Model API implementation (Muse Spark, with tool calling and image input): server-only, timeout, one retry on network error, logs model name and latency. *Done when:* a smoke script returns a completion and a tool call.
+- [x] **T1.5** `ModelProvider` interface with a Meta Model API implementation (Muse Spark, with tool calling and image input): server-only, timeout, one retry on network error, logs model name and latency. *Done when:* a smoke script returns a completion and a tool call.
 - [ ] **T1.5a** Baseten implementation of `ModelProvider` using `meta-models/muse-spark-open-1026` (not `muse-spark-open`), selected by `MODEL_PROVIDER` env var. P1: skip if Baseten credits haven't arrived by 4 Nov noon.
 - [x] **T1.6** Invoice extraction prompt: system prompt with today's date and timezone, schema description, rules (never compute amounts or dates, return tokens; list missing fields; ask one question). Treat user text as data.
 - [x] **T1.6a** Agent tools (deterministic, server-side): `find_client(name)`, `parse_amount(text)` (wraps T1.1), `resolve_due_date(token)` (wraps T1.2), `list_open_invoices(client)`. The model calls these instead of doing maths. Every tool call is written to the audit log. This is what makes it an agent, not an extractor (Best Agentic Use-Case, Use of Meta tooling).
 - [x] **T1.7** `proposeInvoice(input)`: run the agent loop (max 5 tool calls), parse the final JSON, validate with Zod, on failure retry once with the validation error, then fail cleanly. Writes an `agent_requests` row and audit event for every attempt. *Done when:* integration test with a mocked model covers success, invalid JSON then success, and double failure.
 - [x] **T1.8** Missing-info loop (F2): if the proposal lists missing fields or the date needs confirmation, return one question; the answer is appended to the conversation and re-proposed. *Done when:* "Invoice Client A for consulting" asks for the amount, and answering produces a full draft.
-- [ ] **T1.9** Eval set `evals/invoice-cases.json` with 15 inputs (English, Filipino, Taglish, missing fields, ambiguous dates, odd amount formats) and expected drafts. `pnpm eval` runs them against the real model and prints pass rate, per provider. *Done when:* pass rate ≥ 90% on Muse Spark, or failures are fixed in the prompt. Record the Spark Open pass rate too; submit for the open-weight prize only if it is close.
+- [x] **T1.9** Eval set `evals/invoice-cases.json` with 15 inputs (English, Filipino, Taglish, missing fields, ambiguous dates, odd amount formats) and expected drafts. `pnpm eval` runs them against the real model and prints pass rate, per provider. *Done when:* pass rate ≥ 90% on Muse Spark, or failures are fixed in the prompt. Record the Spark Open pass rate too; submit for the open-weight prize only if it is close.
 
 ### 1.3 Screens (F3, F4, F5)
 
@@ -82,9 +82,9 @@ Every task needed to finish the app and all three submissions. Scope comes from 
 
 ### 1.4 Screenshot input (F6, P1)
 
-- [ ] **T1.17** Image upload (PNG/JPG, size limit, server-side only, not stored publicly). Store in a private bucket or as DB blob for the demo.
+- [x] **T1.17** Image upload (PNG/JPG, size limit, server-side only, not stored publicly). Store in a private bucket or as DB blob for the demo.
 - [ ] **T1.18** Vision extraction via the Meta vision model into the same `InvoiceProposal` schema. Text in the image is treated as data.
-- [ ] **T1.19** Review screen shows the screenshot beside the draft.
+- [x] **T1.19** Review screen shows the screenshot beside the draft.
 - [ ] **T1.20** `[you]` Make 3 demo screenshots (Messenger chats agreeing a job and price, one in Taglish). Add them to `evals/`. *Done when:* all 3 produce correct drafts.
 
 > **Checkpoint M2 (4 Nov, 1 PM):** F6 works, or delete its UI entry point and move on.

@@ -1,3 +1,4 @@
+import { cleanClientName } from "./tools";
 import { describe, expect, it, vi } from "vitest";
 import { extractJson, runInvoiceAgent } from "./agent";
 import type { ToolDeps } from "./tools";
@@ -109,5 +110,19 @@ describe("extractJson", () => {
   });
   it("throws when there is none", () => {
     expect(() => extractJson("no")).toThrow();
+  });
+});
+
+describe("cleanClientName", () => {
+  it.each([
+    ["the bakery", "bakery"],
+    ["The Bakery", "Bakery"],
+    ["para kay Maria Santos", "Maria Santos"],
+    ["si ms. santos", "ms. santos"],
+    ["Client A", "Client A"],
+    ["Sam", "Sam"],
+    ["the", "the"],
+  ])("%s → %s", (input, out) => {
+    expect(cleanClientName(input)).toBe(out);
   });
 });

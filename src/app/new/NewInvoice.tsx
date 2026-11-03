@@ -1,18 +1,21 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { proposeInvoice, type ProposeResponse } from "@/app/actions";
 import { AgentSteps } from "@/components/AgentSteps";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { TextAreaField, TextField } from "@/components/ui/Field";
+import { shrinkImage } from "@/lib/browser-media";
 import { ReviewForm } from "./ReviewForm";
+import { VoiceNote } from "./VoiceNote";
 
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // before downscaling in the browser
 
 export function NewInvoice() {
   const [text, setText] = useState("");
   const [image, setImage] = useState<string | null>(null);
+  const [fromVoice, setFromVoice] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [turns, setTurns] = useState<string[]>([]);
   const [answer, setAnswer] = useState("");
@@ -23,7 +26,7 @@ export function NewInvoice() {
   function run(nextTurns: string[]) {
     setTurns(nextTurns);
     startTransition(async () => {
-      setResponse(await proposeInvoice({ turns: nextTurns, imageDataUrl: image ?? undefined }));
+      setResponse(await proposeInvoice({ turns: nextTurns, imageDataUrl: image ?? undefined, source: fromVoice ? "voice" : undefined }));
     });
   }
 
@@ -31,15 +34,14 @@ export function NewInvoice() {
     setImageError(null);
     if (!file) return setImage(null);
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return setImageError("Use a PNG, JPG or WebP screenshot.");
-    if (file.size > MAX_IMAGE_BYTES) return setImageError("Use a screenshot under 4 MB.");
-    const reader = new FileReader();
-    reader.onload = () => setImage(reader.result as string);
-    reader.readAsDataURL(file);
+    if (file.size > MAX_IMAGE_BYTES) return setImageError("Use a screenshot under 15 MB.");
+    shrinkImage(file).then(setImage, () => setImageError("That image couldn't be read. Try another screenshot."));
   }
 
   function reset() {
     setText("");
     setImage(null);
+    setFromVoice(false);
     setTurns([]);
     setAnswer("");
     setResponse(null);
@@ -68,6 +70,14 @@ export function NewInvoice() {
               onChange={(e) => setText(e.target.value)}
               maxLength={4000}
             />
+            {fromVoice && <p className="-mt-2 text-sm text-muted">Transcribed from your voice note. Fix anything it misheard, then draft.</p>}
+            <VoiceNote
+              disabled={pending}
+              onTranscript={(t) => {
+                setText(t);
+                setFromVoice(true);
+              }}
+            />
             <div className="flex flex-col gap-1.5">
               <label htmlFor="screenshot" className="font-bold">
                 Chat screenshot (optional)
@@ -92,6 +102,7 @@ export function NewInvoice() {
             {turns.map((t, i) => (
               <p key={i} className="rounded-control border-2 border-line bg-page p-3 whitespace-pre-wrap">
                 {i > 0 && <span className="font-bold">Your answer: </span>}
+                {i === 0 && fromVoice && <span className="font-bold">Voice note: </span>}
                 {t}
               </p>
             ))}
@@ -107,7 +118,7 @@ export function NewInvoice() {
       {started && (
         <Card className="flex flex-col gap-5" aria-live="polite" aria-busy={pending}>
           <h2 className="text-xl font-extrabold">Invoice draft</h2>
-          {pending && <p className="text-muted">PayAgent is reading your message and checking the details…</p>}
+          {pending && <Working hasImage={!!image} />}
 
           {!pending && result?.status === "error" && (
             <div className="flex flex-col items-start gap-3">
@@ -162,6 +173,24 @@ export function NewInvoice() {
           )}
         </Card>
       )}
+    </div>
+  );
+}
+
+/** Honest progress while the single agent call runs: what it does, and how long it has taken. */
+function Working({ hasImage }: { hasImage: boolean }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const id = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="font-semibold">PayAgent is working… {seconds}s</p>
+      <p className="text-sm text-muted">
+        {hasImage ? "Reading the screenshot, then checking" : "Checking"} the client, amounts and due date with its tools. This usually takes 10 to 20 seconds.
+      </p>
     </div>
   );
 }

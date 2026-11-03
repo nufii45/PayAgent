@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
-import { describeStep } from "@/components/AgentSteps";
+import { describeStep } from "@/lib/describe-step";
 import { ReturnLink } from "@/components/ui/BackLink";
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";

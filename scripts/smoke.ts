@@ -1,7 +1,9 @@
 // pnpm smoke — checks the model API and the database with your .env.local. Prints no secrets.
 import { config } from "dotenv";
+import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { createModelClient, providerConfigFromEnv } from "../src/lib/ai/provider";
+import { transcribe, transcribeConfigFromEnv } from "../src/lib/ai/transcribe";
 import { createDb } from "../src/db/index";
 
 config({ path: ".env.local" });
@@ -43,6 +45,29 @@ async function checkModel() {
     console.log(`  2. Tool call: NONE. Model replied with text instead: ${JSON.stringify(tooled.choices[0]?.message?.content)?.slice(0, 200)}`);
     process.exitCode = 1;
   }
+
+  t = Date.now();
+  const image = readFileSync("evals/screenshots/chat-maria-en.png").toString("base64");
+  const seen = await m.client.chat.completions.create({
+    model: m.visionModel,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Who is this chat with, and what price was agreed? Reply in one short line." },
+          { type: "image_url", image_url: { url: `data:image/png;base64,${image}` } },
+        ],
+      },
+    ],
+  });
+  console.log(`  3. Screenshot (${Date.now() - t} ms): ${JSON.stringify(seen.choices[0]?.message?.content)?.slice(0, 200)}`);
+}
+
+async function checkTranscribe() {
+  const t = Date.now();
+  const r = await transcribe(transcribeConfigFromEnv(process.env), new Uint8Array(readFileSync("evals/audio/voice-note-en.wav")));
+  if (!r.ok) throw new Error(r.error);
+  console.log(`Voice transcribe (${Date.now() - t} ms): ${JSON.stringify(r.transcript)}`);
 }
 
 async function checkDb() {
@@ -53,13 +78,29 @@ async function checkDb() {
   console.log(`Database (${Date.now() - t} ms): connected to ${JSON.stringify(rows.rows[0]?.db)}`);
 }
 
+/** Error message plus its causes, so network and driver errors show the real reason. */
+function describeError(err: unknown): string {
+  const parts: string[] = [];
+  for (let e: unknown = err, depth = 0; e && depth < 4; depth++) {
+    if (e instanceof Error) {
+      const code = (e as { code?: string }).code;
+      parts.push(`${e.message.split("\n")[0]}${code ? ` [${code}]` : ""}`);
+      e = e.cause;
+    } else {
+      parts.push(String(e));
+      break;
+    }
+  }
+  return parts.join(" ← ");
+}
+
 async function main() {
-  for (const [name, check] of [["model", checkModel], ["database", checkDb]] as const) {
+  for (const [name, check] of [["model", checkModel], ["transcribe", checkTranscribe], ["database", checkDb]] as const) {
     try {
       await check();
     } catch (err) {
       process.exitCode = 1;
-      console.error(`FAILED ${name}: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`FAILED ${name}: ${describeError(err)}`);
     }
   }
 }

@@ -26,7 +26,7 @@ describe("parseAmount", () => {
 });
 
 describe("parseAmount with dollar marks", () => {
-  it.each([["$300", 30_000], ["USD 300", 30_000], ["300 dollars", 30_000], ["$1,250.50", 125_050]])("%s", (text, centavos) => {
+  it.each([["$300", 30_000], ["USD 300", 30_000], ["300 dollars", 30_000], ["$1,250.50", 125_050], ["+2,000", 200_000]])("%s", (text, centavos) => {
     expect(parseAmount(text)).toEqual({ ok: true, centavos });
   });
 });
