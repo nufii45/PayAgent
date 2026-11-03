@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { AgentStep } from "@/lib/ai/agent";
 import { formatDate } from "@/lib/dates";
 import { getInvoiceWithTimeline } from "@/lib/invoices";
-import { formatPeso } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +86,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             </div>
             <div>
               <dt className="text-sm text-muted">Total</dt>
-              <dd className="text-xl font-extrabold tabular-nums">{formatPeso(invoice.amountCentavos)}</dd>
+              <dd className="text-xl font-extrabold tabular-nums">{formatMoney(invoice.amountCentavos, invoice.currency)}</dd>
             </div>
           </dl>
           <table className="w-full text-left">
@@ -101,7 +101,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
               {items.map((item) => (
                 <tr key={item.id} className="border-b border-line">
                   <td className="py-2 pr-4">{item.description}</td>
-                  <td className="py-2 text-right tabular-nums">{formatPeso(item.amountCentavos)}</td>
+                  <td className="py-2 text-right tabular-nums">{formatMoney(item.amountCentavos, invoice.currency)}</td>
                 </tr>
               ))}
             </tbody>

@@ -41,13 +41,13 @@ When done, reply with ONLY a JSON object, no prose, no code fences:
 {
   "clientName": string | null,
   "currency": "PHP" | "USD",
-  "items": [{ "description": string, "amountText": string }],
+  "items": [{ "description": string | null, "amountText": string | null }],
   "dueDateToken": string | null,
   "notes": string | null,
   "missingFields": ("client" | "amount" | "dueDate" | "description")[],
   "question": string | null
 }
-- amountText is the amount exactly as the user wrote it (e.g. "2.5k").
+- amountText is the amount exactly as the user wrote it (e.g. "2.5k", "tatlong libong piso"). Amounts in words are valid: pass them to parse_amount as written. Only mark amount missing if parse_amount fails on it.
 - dueDateToken is one of: today, tomorrow, in_<n>_days, this_<weekday>, next_<weekday>, end_of_month, absolute:YYYY-MM-DD.
 - If anything required is missing or unclear, leave it null, list it in missingFields, and set question to ONE short question in the user's language. Never guess.
 - Default currency is PHP unless the user clearly says dollars.`;

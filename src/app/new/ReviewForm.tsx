@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { TextAreaField, TextField } from "@/components/ui/Field";
 import { formatDate } from "@/lib/dates";
 import type { InvoiceDraft } from "@/lib/invoice-schema";
-import { formatPeso, parseAmount } from "@/lib/money";
+import { formatMoney, parseAmount } from "@/lib/money";
 
 const toAmountText = (centavos: number) => (centavos / 100).toFixed(2);
 
@@ -82,7 +82,7 @@ export function ReviewForm({
           </div>
         ))}
         <p className="text-lg font-extrabold" aria-live="polite">
-          Total: {total != null ? formatPeso(total) : "check the amounts above"}
+          Total: {total != null ? formatMoney(total, draft.currency) : "check the amounts above"}
         </p>
       </fieldset>
 

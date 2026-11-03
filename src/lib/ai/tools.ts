@@ -1,11 +1,11 @@
 import type OpenAI from "openai";
-import { formatPeso, parseAmount } from "../money";
+import { formatMoney, parseAmount } from "../money";
 import { resolveDueDate } from "../dates";
 
 // Deterministic tools the agent can call. They do the maths; the model never does.
 
 export type ClientMatch = { id: string; name: string; email: string | null };
-export type OpenInvoice = { number: string; amountCentavos: number; dueDate: string; status: string };
+export type OpenInvoice = { number: string; currency: "PHP" | "USD"; amountCentavos: number; dueDate: string; status: string };
 
 export type ToolDeps = {
   findClient(name: string): Promise<ClientMatch[]>;
@@ -30,7 +30,7 @@ export const toolDefinitions: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "parse_amount",
-      description: "Check that an amount the user wrote (e.g. '2.5k', '₱2,500.50', 'P3000') can be read. Returns pesos or an error.",
+      description: "Check that an amount the user wrote can be read. Accepts digits ('2.5k', '₱2,500.50', 'P3000') and words in Filipino or English ('tatlong libong piso', 'two thousand'). Pass only the amount, exactly as written. Returns the number or an error; currency is set separately.",
       parameters: {
         type: "object",
         properties: { text: { type: "string" } },
@@ -81,7 +81,7 @@ export async function runTool(name: string, rawArgs: string, deps: ToolDeps): Pr
     }
     case "parse_amount": {
       const r = parseAmount(str("text"));
-      return r.ok ? { ok: true, pesos: formatPeso(r.centavos) } : { ok: false, error: r.error };
+      return r.ok ? { ok: true, amount: (r.centavos / 100).toFixed(2) } : { ok: false, error: r.error };
     }
     case "resolve_due_date": {
       const r = resolveDueDate(str("token"), deps.now);
@@ -89,7 +89,7 @@ export async function runTool(name: string, rawArgs: string, deps: ToolDeps): Pr
     }
     case "list_open_invoices": {
       const invoices = await deps.listOpenInvoices(str("client_name"));
-      return { invoices: invoices.map((i) => ({ ...i, amount: formatPeso(i.amountCentavos) })) };
+      return { invoices: invoices.map((i) => ({ ...i, amount: formatMoney(i.amountCentavos, i.currency) })) };
     }
     default:
       return { error: `Unknown tool ${name}` };

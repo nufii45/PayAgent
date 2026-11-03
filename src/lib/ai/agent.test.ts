@@ -58,7 +58,7 @@ describe("runInvoiceAgent", () => {
     const r = await runInvoiceAgent(client, "muse-spark-1.3", { turns: ["Gawan mo ng invoice si client a, 2.5k"] }, deps);
     expect(r.ok && r.proposal.clientName).toBe("Client A");
     expect(r.steps.map((s) => s.type === "tool_call" && s.name)).toEqual(["find_client", "parse_amount", "resolve_due_date"]);
-    expect(r.steps[1]).toMatchObject({ result: { ok: true, pesos: "₱2,500.00" } });
+    expect(r.steps[1]).toMatchObject({ result: { ok: true, amount: "2500.00" } });
     expect(r.steps[2]).toMatchObject({ result: { ok: true, date: "2026-11-06" } });
     // Tool results are sent back to the model.
     const secondCall = create.mock.calls[1][0];

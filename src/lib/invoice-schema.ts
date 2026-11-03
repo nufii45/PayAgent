@@ -2,15 +2,23 @@ import { z } from "zod";
 import { parseAmount } from "./money";
 import { formatDate, resolveDueDate, type IsoDate } from "./dates";
 
+/** Missing or blank text becomes null. */
+const optionalText = z
+  .string()
+  .nullish()
+  .transform((s) => (s?.trim() ? s.trim() : null));
+
 /** What the model is allowed to return. Raw strings and tokens only: no maths. */
 export const InvoiceProposal = z.object({
   clientName: z.string().trim().min(1).nullable(),
   currency: z.enum(["PHP", "USD"]).default("PHP"),
   items: z
     .array(
+      // Nullable so a reply with a known item but no amount (or vice versa) is a
+      // follow-up question, not a format error that costs a whole extra model round.
       z.object({
-        description: z.string().trim().min(1),
-        amountText: z.string().trim().min(1),
+        description: optionalText,
+        amountText: optionalText,
       }),
     )
     .default([]),
@@ -40,7 +48,8 @@ export type DraftResult =
 export function proposalToDraft(proposal: InvoiceProposal, now: Date = new Date()): DraftResult {
   const missing = new Set(proposal.missingFields);
   if (!proposal.clientName) missing.add("client");
-  if (proposal.items.length === 0) missing.add("amount");
+  if (proposal.items.length === 0 || proposal.items.some((i) => !i.amountText)) missing.add("amount");
+  if (proposal.items.some((i) => !i.description)) missing.add("description");
   if (!proposal.dueDateToken) missing.add("dueDate");
   if (missing.size > 0) {
     return {
@@ -52,9 +61,9 @@ export function proposalToDraft(proposal: InvoiceProposal, now: Date = new Date(
 
   const errors: string[] = [];
   const items = proposal.items.map((item) => {
-    const amount = parseAmount(item.amountText);
+    const amount = parseAmount(item.amountText!);
     if (!amount.ok) errors.push(amount.error);
-    return { description: item.description, amountCentavos: amount.ok ? amount.centavos : 0 };
+    return { description: item.description!, amountCentavos: amount.ok ? amount.centavos : 0 };
   });
   const due = resolveDueDate(proposal.dueDateToken!, now);
   if (!due.ok) errors.push(due.error);

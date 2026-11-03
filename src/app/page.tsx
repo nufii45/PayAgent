@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatDate } from "@/lib/dates";
 import { listInvoices } from "@/lib/invoices";
-import { formatPeso } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +34,7 @@ export default async function Home() {
               <Link href={`/invoices/${inv.id}`} className="grid gap-1 p-4 hover:bg-page sm:grid-cols-[7rem_1fr_9rem_9rem_8rem] sm:items-center sm:gap-4">
                 <span className="font-mono text-sm text-muted">{inv.number}</span>
                 <span className="font-bold">{inv.clientName}</span>
-                <span className="font-bold tabular-nums sm:text-right">{formatPeso(inv.amountCentavos)}</span>
+                <span className="font-bold tabular-nums sm:text-right">{formatMoney(inv.amountCentavos, inv.currency)}</span>
                 <span className="text-muted">Due {formatDate(inv.dueDate)}</span>
                 <span>
                   <StatusBadge status={inv.status} />

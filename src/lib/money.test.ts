@@ -20,8 +20,14 @@ describe("parseAmount", () => {
     expect(parseAmount(input)).toEqual({ ok: true, centavos: expected });
   });
 
-  it.each(["", "abc", "-500", "0", "2.555", "2,50", "1.2.3", "2500 usd", "1.234567k"])("rejects %s", (input) => {
+  it.each(["", "abc", "-500", "0", "2.555", "2,50", "1.2.3", "1.234567k"])("rejects %s", (input) => {
     expect(parseAmount(input).ok).toBe(false);
+  });
+});
+
+describe("parseAmount with dollar marks", () => {
+  it.each([["$300", 30_000], ["USD 300", 30_000], ["300 dollars", 30_000], ["$1,250.50", 125_050]])("%s", (text, centavos) => {
+    expect(parseAmount(text)).toEqual({ ok: true, centavos });
   });
 });
 

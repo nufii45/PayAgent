@@ -22,7 +22,7 @@ export async function listOpenInvoicesForClient(db: Db, clientName: string): Pro
   const matches = await findClients(db, clientName);
   if (!matches.length) return [];
   return db
-    .select({ number: invoices.number, amountCentavos: invoices.amountCentavos, dueDate: invoices.dueDate, status: invoices.status })
+    .select({ number: invoices.number, currency: invoices.currency, amountCentavos: invoices.amountCentavos, dueDate: invoices.dueDate, status: invoices.status })
     .from(invoices)
     .where(and(inArray(invoices.clientId, matches.map((m) => m.id)), notInArray(invoices.status, ["paid", "void"])))
     .orderBy(desc(invoices.createdAt))

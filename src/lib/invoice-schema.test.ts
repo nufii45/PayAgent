@@ -53,3 +53,22 @@ describe("proposalToDraft", () => {
     expect(result.status === "invalid" && result.errors).toHaveLength(2);
   });
 });
+
+describe("proposals with gaps", () => {
+  const now = new Date("2026-11-03T02:00:00Z");
+  const base = { clientName: "Client A", currency: "PHP", dueDateToken: "tomorrow", notes: null, missingFields: [], question: null };
+
+  it("treats an item with a null amount as a missing amount, not a format error", () => {
+    const parsed = InvoiceProposal.parse({ ...base, items: [{ description: "consulting", amountText: null }] });
+    const r = proposalToDraft(parsed, now);
+    expect(r.status).toBe("needs_info");
+    if (r.status === "needs_info") expect(r.missing).toContain("amount");
+  });
+
+  it("treats a blank description as missing", () => {
+    const parsed = InvoiceProposal.parse({ ...base, items: [{ description: " ", amountText: "2.5k" }] });
+    const r = proposalToDraft(parsed, now);
+    expect(r.status).toBe("needs_info");
+    if (r.status === "needs_info") expect(r.missing).toContain("description");
+  });
+});

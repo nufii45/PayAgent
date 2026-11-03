@@ -48,10 +48,15 @@ async function main() {
         for (const m of c.expect.missing) if (!r.missing.includes(m)) problems.push(`didn't flag missing ${m}`);
       }
       if (r.status === "invalid") problems.push(r.errors.join("; "));
+      if (problems.length && r.status === "needs_info") problems.push(`missing [${r.missing.join(", ")}], asked "${r.question}"`);
     }
     const tools = run.steps.filter((s) => s.type === "tool_call").length;
+    const retries = run.steps.filter((s) => s.type === "retry");
     if (!problems.length) passed++;
-    console.log(`${problems.length ? "FAIL" : "pass"}  ${c.id.padEnd(20)} ${(run.latencyMs / 1000).toFixed(1)}s  ${tools} tool calls  ${problems.join(", ")}`);
+    if (problems.length) {
+      for (const s of run.steps) if (s.type === "tool_call") problems.push(`\n        ${s.name}(${s.args}) → ${JSON.stringify(s.result)}`);
+    }
+    console.log(`${problems.length ? "FAIL" : "pass"}  ${c.id.padEnd(20)} ${(run.latencyMs / 1000).toFixed(1)}s  ${tools} tool calls${retries.length ? `, ${retries.length} retry (${retries.map((r) => r.reason).join("; ")})` : ""}  ${problems.join(", ")}`);
   }
   const rate = Math.round((passed / cases.length) * 100);
   console.log(`\n${passed}/${cases.length} passed (${rate}%)`);

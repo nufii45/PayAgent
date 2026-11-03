@@ -1,3 +1,5 @@
+import { parseAmountWords } from "./amount-words";
+
 // Money is always integer centavos. Never use floats for amounts.
 
 export type ParseAmountResult =
@@ -14,12 +16,18 @@ export function parseAmount(input: string): ParseAmountResult {
   const text = input
     .trim()
     .toLowerCase()
-    .replace(/^(₱|php|p)\s*/, "")
-    .replace(/\s*(php|pesos?)$/, "")
+    // Currency marks only; the currency itself is decided separately.
+    .replace(/^(₱|php|p|\$|usd|us\$)\s*/, "")
+    .replace(/\s*(php|pesos?|usd|dollars?)$/, "")
     .trim();
 
   const match = /^(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?\s*([km]?)$/.exec(text);
-  if (!match) return { ok: false, error: `Can't read "${input}" as an amount` };
+  if (!match) {
+    // Fall back to amounts written in words ("tatlong libong piso", "two thousand").
+    const pesos = parseAmountWords(input);
+    if (pesos != null && Number.isSafeInteger(pesos * 100)) return { ok: true, centavos: pesos * 100 };
+    return { ok: false, error: `Can't read "${input}" as an amount` };
+  }
 
   const [, whole, fraction = "", suffix] = match;
   const multiplier = SUFFIX[suffix];
@@ -45,4 +53,10 @@ const pesoFormatter = new Intl.NumberFormat("en-PH", { style: "currency", curren
 
 export function formatPeso(centavos: number): string {
   return pesoFormatter.format(centavos / 100);
+}
+
+const dollarFormatter = new Intl.NumberFormat("en-PH", { style: "currency", currency: "USD" });
+
+export function formatMoney(centavos: number, currency: "PHP" | "USD" = "PHP"): string {
+  return currency === "USD" ? dollarFormatter.format(centavos / 100) : formatPeso(centavos);
 }
