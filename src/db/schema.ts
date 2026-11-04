@@ -26,8 +26,38 @@ export const approvalAction = pgEnum("approval_action", ["approve", "reject"]);
 // Concurrency-safe invoice numbers: INV-0001, INV-0002, ...
 export const invoiceNumberSeq = pgSequence("invoice_number_seq", { startWith: 1 });
 
+// One guest workspace per browser. Everything a visitor creates belongs to exactly one workspace,
+// and every read and write is filtered by it. Deleting a workspace deletes all of its records.
+export const workspaces = pgTable("workspaces", {
+  id: uuid("id").primaryKey(),
+  // { role, currency, displayName }
+  preferences: jsonb("preferences").notNull().default(sql`'{}'::jsonb`),
+  onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+  privacyAcknowledgedAt: timestamp("privacy_acknowledged_at", { withTimezone: true }),
+  // Set when a returning browser's earlier workspace had expired or been deleted.
+  replacedExpired: timestamp("replaced_expired_at", { withTimezone: true }),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: createdAt(),
+});
+
+const workspaceId = () => uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" });
+
+// One row per model call, for per-workspace, per-network and global daily limits.
+export const modelCalls = pgTable(
+  "model_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id"),
+    ipHash: text("ip_hash"),
+    kind: text("kind").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("model_calls_time_idx").on(t.createdAt), index("model_calls_ws_idx").on(t.workspaceId, t.createdAt)],
+);
+
 export const clients = pgTable("clients", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: workspaceId(),
   name: text("name").notNull(),
   email: text("email"),
   aliases: text("aliases").array().notNull().default(sql`'{}'::text[]`),
@@ -39,13 +69,14 @@ export const evidenceKind = pgEnum("evidence_kind", ["image", "text"]);
 // One business case: a conversation the user wants reconstructed.
 export const investigations = pgTable("investigations", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: workspaceId(),
   title: text("title").notNull(),
   instruction: text("instruction"),
   // The user's corrections, kept apart from the evidence and the model's reading.
   corrections: jsonb("corrections").notNull().default(sql`'{}'::jsonb`),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [index("investigations_ws_idx").on(t.workspaceId, t.updatedAt)]);
 
 export const evidenceSources = pgTable(
   "evidence_sources",
@@ -91,6 +122,7 @@ export const analysisVersions = pgTable(
 
 export const agentRequests = pgTable("agent_requests", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: workspaceId(),
   investigationId: uuid("investigation_id").references(() => investigations.id, { onDelete: "set null" }),
   inputType: inputType("input_type").notNull(),
   rawInput: text("raw_input").notNull(),
@@ -107,6 +139,7 @@ export const invoices = pgTable(
   "invoices",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: workspaceId(),
     number: text("number")
       .notNull()
       .unique()
@@ -125,7 +158,7 @@ export const invoices = pgTable(
       .references(() => agentRequests.id),
     createdAt: createdAt(),
   },
-  (t) => [index("invoices_client_idx").on(t.clientId)],
+  (t) => [index("invoices_client_idx").on(t.clientId), index("invoices_ws_idx").on(t.workspaceId, t.createdAt)],
 );
 
 export const invoiceItems = pgTable("invoice_items", {
@@ -143,22 +176,24 @@ export const approvals = pgTable("approvals", {
   requestId: uuid("request_id")
     .notNull()
     .unique()
-    .references(() => agentRequests.id),
+    .references(() => agentRequests.id, { onDelete: "cascade" }),
   action: approvalAction("action").notNull(),
   edits: jsonb("edits"),
   decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Append-only. The app never updates or deletes rows here.
+// Append-only. The app never updates or deletes rows here, except that deleting a whole
+// guest workspace (by the user, or at the end of its retention period) removes its log too.
 export const auditEvents = pgTable(
   "audit_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: workspaceId(),
     entityType: text("entity_type").notNull(),
     entityId: uuid("entity_id").notNull(),
     eventType: text("event_type").notNull(),
     payload: jsonb("payload"),
     createdAt: createdAt(),
   },
-  (t) => [index("audit_entity_idx").on(t.entityType, t.entityId, t.createdAt)],
+  (t) => [index("audit_entity_idx").on(t.entityType, t.entityId, t.createdAt), index("audit_ws_idx").on(t.workspaceId, t.createdAt)],
 );

@@ -1,7 +1,7 @@
 import { auditEvents } from "./schema";
 import type { Db } from "./index";
 
-export type EntityType = "agent_request" | "invoice" | "approval" | "payment" | "investigation";
+export type EntityType = "agent_request" | "invoice" | "approval" | "payment" | "investigation" | "workspace";
 
 /** Append one event. There is deliberately no update or delete counterpart. */
 export async function recordAudit(

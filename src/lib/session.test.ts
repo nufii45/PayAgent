@@ -1,19 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { checkPassword, createSessionValue, verifySessionValue } from "./session";
+import { guestCookieOptions, isWorkspaceId, retentionDays } from "./session";
 
-describe("session", () => {
-  it("accepts its own session and rejects tampered or expired ones", async () => {
-    const now = 1_800_000_000_000;
-    const { value } = await createSessionValue("hunter2", now);
-    expect(await verifySessionValue("hunter2", value, now)).toBe(true);
-    expect(await verifySessionValue("other", value, now)).toBe(false);
-    expect(await verifySessionValue("hunter2", value.replace(/.$/, "x"), now)).toBe(false);
-    expect(await verifySessionValue("hunter2", value, now + 8 * 86_400_000)).toBe(false);
-    expect(await verifySessionValue("hunter2", undefined, now)).toBe(false);
+describe("guest session", () => {
+  it("accepts only random v4 uuids as workspace ids", () => {
+    expect(isWorkspaceId(crypto.randomUUID())).toBe(true);
+    expect(isWorkspaceId("00000000-0000-0000-0000-000000000000")).toBe(false);
+    expect(isWorkspaceId("1 or 1=1")).toBe(false);
+    expect(isWorkspaceId(undefined)).toBe(false);
   });
 
-  it("checks passwords", async () => {
-    expect(await checkPassword("hunter2", "hunter2")).toBe(true);
-    expect(await checkPassword("hunter2", "hunter3")).toBe(false);
+  it("reads the retention period, defaulting to 7 days", () => {
+    expect(retentionDays({})).toBe(7);
+    expect(retentionDays({ GUEST_RETENTION_DAYS: "3" })).toBe(3);
+    expect(retentionDays({ GUEST_RETENTION_DAYS: "0" })).toBe(7);
+    expect(retentionDays({ GUEST_RETENTION_DAYS: "abc" })).toBe(7);
+  });
+
+  it("issues an httpOnly cookie that lasts the retention period", () => {
+    const o = guestCookieOptions({ GUEST_RETENTION_DAYS: "2", NODE_ENV: "production" });
+    expect(o).toMatchObject({ httpOnly: true, secure: true, sameSite: "lax", maxAge: 2 * 86_400 });
   });
 });

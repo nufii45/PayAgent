@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/dates";
 import { clarificationMessage, followUpMessage } from "@/lib/investigation/messages";
 import { STATUS_LABEL, diffAnalyses, type Analysis } from "@/lib/investigation/reconcile";
 import { getInvestigation } from "@/lib/investigations";
+import { currentWorkspace } from "@/lib/current-workspace";
 import { formatPeso } from "@/lib/money";
 import { RetryAnalysis } from "./RetryAnalysis";
 
@@ -34,7 +35,8 @@ export default async function InvestigationPage({ params, searchParams }: { para
   const { id } = await params;
   const { v } = await searchParams;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
-  const data = await getInvestigation(db, id);
+  const ws = await currentWorkspace();
+  const data = await getInvestigation(db, ws.id, id);
   if (!data) notFound();
   const { investigation, evidence, versions } = data;
 

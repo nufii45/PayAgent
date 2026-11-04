@@ -14,23 +14,35 @@ export type VersionEvidence = { eid: string; evidenceId: string; label: string; 
 export type Trigger = "initial" | "new_evidence" | "correction" | "reorder" | "removed_evidence";
 export type Extractor = (evidence: EvidenceInput[], instruction: string | null) => Promise<ExtractResult>;
 
+/** Thrown when an id doesn't exist in the caller's workspace. Other workspaces' records look exactly like missing ones. */
+export class NotFound extends Error {
+  constructor() {
+    super("This investigation doesn't exist in your workspace.");
+  }
+}
+
+export const MAX_EVIDENCE_PER_INVESTIGATION = 20;
+
+const own = (ws: string, id: string) => and(eq(investigations.id, id), eq(investigations.workspaceId, ws));
+
 const hash = (e: NewEvidence) => createHash("sha256").update(e.kind === "image" ? e.dataUrl : e.text.trim()).digest("hex");
 
-export async function createInvestigation(db: Db, input: { title: string; instruction: string | null; evidence: NewEvidence[] }) {
+export async function createInvestigation(db: Db, ws: string, input: { title: string; instruction: string | null; evidence: NewEvidence[] }) {
   return db.transaction(async (tx) => {
-    const [inv] = await tx.insert(investigations).values({ title: input.title, instruction: input.instruction }).returning({ id: investigations.id });
-    await tx.insert(auditEvents).values({ entityType: "investigation", entityId: inv.id, eventType: "investigation.created", payload: { evidenceCount: input.evidence.length } });
+    const [inv] = await tx.insert(investigations).values({ workspaceId: ws, title: input.title, instruction: input.instruction }).returning({ id: investigations.id });
+    await tx.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: inv.id, eventType: "investigation.created", payload: { evidenceCount: input.evidence.length } });
     return inv.id;
   }).then(async (id) => {
-    await addEvidence(db, id, input.evidence);
+    await addEvidence(db, ws, id, input.evidence);
     return id;
   });
 }
 
 /** Adds evidence at the end. Exact re-uploads are skipped and reported. */
-export async function addEvidence(db: Db, investigationId: string, evidence: NewEvidence[]) {
+export async function addEvidence(db: Db, ws: string, investigationId: string, evidence: NewEvidence[]) {
   return db.transaction(async (tx) => {
-    await tx.select({ id: investigations.id }).from(investigations).where(eq(investigations.id, investigationId)).for("update");
+    const [inv] = await tx.select({ id: investigations.id }).from(investigations).where(own(ws, investigationId)).for("update");
+    if (!inv) throw new NotFound();
     const existing = await tx.select({ hash: evidenceSources.contentHash, position: evidenceSources.position, kind: evidenceSources.kind }).from(evidenceSources).where(eq(evidenceSources.investigationId, investigationId));
     const hashes = new Set(existing.map((e) => e.hash));
     let position = existing.reduce((max, e) => Math.max(max, e.position), -1);
@@ -38,10 +50,15 @@ export async function addEvidence(db: Db, investigationId: string, evidence: New
     let texts = existing.filter((e) => e.kind === "text").length;
     const added: string[] = [];
     let skipped = 0;
+    let tooMany = 0;
     for (const e of evidence) {
       const h = hash(e);
       if (hashes.has(h)) {
         skipped++;
+        continue;
+      }
+      if (existing.length + added.length >= MAX_EVIDENCE_PER_INVESTIGATION) {
+        tooMany++;
         continue;
       }
       hashes.add(h);
@@ -60,38 +77,47 @@ export async function addEvidence(db: Db, investigationId: string, evidence: New
         .returning({ id: evidenceSources.id });
       added.push(row.id);
     }
-    if (added.length) await tx.insert(auditEvents).values({ entityType: "investigation", entityId: investigationId, eventType: "evidence.added", payload: { added: added.length, skippedDuplicates: skipped } });
-    return { added, skipped };
+    if (added.length) await tx.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: investigationId, eventType: "evidence.added", payload: { added: added.length, skippedDuplicates: skipped } });
+    return { added, skipped, tooMany };
   });
 }
 
-export async function removeEvidence(db: Db, investigationId: string, evidenceId: string) {
+export async function removeEvidence(db: Db, ws: string, investigationId: string, evidenceId: string) {
+  const [inv] = await db.select({ id: investigations.id }).from(investigations).where(own(ws, investigationId));
+  if (!inv) throw new NotFound();
   const removed = await db.delete(evidenceSources).where(and(eq(evidenceSources.id, evidenceId), eq(evidenceSources.investigationId, investigationId))).returning({ label: evidenceSources.label });
-  if (removed.length) await db.insert(auditEvents).values({ entityType: "investigation", entityId: investigationId, eventType: "evidence.removed", payload: { label: removed[0].label } });
+  if (removed.length) await db.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: investigationId, eventType: "evidence.removed", payload: { label: removed[0].label } });
   return removed.length > 0;
 }
 
-export async function reorderEvidence(db: Db, investigationId: string, orderedIds: string[]) {
+export async function reorderEvidence(db: Db, ws: string, investigationId: string, orderedIds: string[]) {
   await db.transaction(async (tx) => {
+    const [inv] = await tx.select({ id: investigations.id }).from(investigations).where(own(ws, investigationId)).for("update");
+    if (!inv) throw new NotFound();
     const rows = await tx.select({ id: evidenceSources.id }).from(evidenceSources).where(eq(evidenceSources.investigationId, investigationId));
     const ids = new Set(rows.map((r) => r.id));
     if (orderedIds.length !== ids.size || !orderedIds.every((id) => ids.has(id))) throw new Error("Evidence list changed. Reload and try again.");
-    for (const [i, id] of orderedIds.entries()) await tx.update(evidenceSources).set({ position: i }).where(eq(evidenceSources.id, id));
-    await tx.insert(auditEvents).values({ entityType: "investigation", entityId: investigationId, eventType: "evidence.reordered", payload: null });
+    for (const [i, id] of orderedIds.entries()) await tx.update(evidenceSources).set({ position: i }).where(and(eq(evidenceSources.id, id), eq(evidenceSources.investigationId, investigationId)));
+    await tx.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: investigationId, eventType: "evidence.reordered", payload: null });
   });
 }
 
-export async function listInvestigations(db: Db) {
+export async function listInvestigations(db: Db, ws: string) {
   const rows = await db
     .select({
       id: investigations.id,
       title: investigations.title,
       updatedAt: investigations.updatedAt,
+      lastFailed: sql<boolean>`exists(select 1 from audit_events a where a.entity_id = "investigations"."id" and a.event_type = 'analysis.failed' and a.created_at > coalesce((select max(v.created_at) from analysis_versions v where v.investigation_id = "investigations"."id"), 'epoch'))`,
+      previous: sql<Analysis | null>`(select v.analysis from analysis_versions v where v.investigation_id = "investigations"."id" and v.analysis is not null order by v.version desc offset 1 limit 1)`,
+      latestTrigger: sql<string | null>`(select v.trigger from analysis_versions v where v.investigation_id = "investigations"."id" and v.analysis is not null order by v.version desc limit 1)`,
+      latestAt: sql<string | null>`(select v.created_at from analysis_versions v where v.investigation_id = "investigations"."id" and v.analysis is not null order by v.version desc limit 1)`,
       // Fully qualified: drizzle renders column refs unqualified, which would bind to the subquery's own "id".
       evidenceCount: sql<number>`(select count(*)::int from evidence_sources e where e.investigation_id = "investigations"."id")`,
       latest: sql<{ version: number; analysis: Analysis | null } | null>`(select json_build_object('version', v.version, 'analysis', v.analysis) from analysis_versions v where v.investigation_id = "investigations"."id" and v.analysis is not null order by v.version desc limit 1)`,
     })
     .from(investigations)
+    .where(eq(investigations.workspaceId, ws))
     .orderBy(desc(investigations.updatedAt))
     .limit(50);
   return rows;
@@ -99,8 +125,8 @@ export async function listInvestigations(db: Db) {
 
 export type VersionRow = typeof analysisVersions.$inferSelect & { analysis: Analysis | null; evidence: VersionEvidence[]; extraction: Extraction | null };
 
-export async function getInvestigation(db: Db, id: string) {
-  const [inv] = await db.select().from(investigations).where(eq(investigations.id, id));
+export async function getInvestigation(db: Db, ws: string, id: string) {
+  const [inv] = await db.select().from(investigations).where(own(ws, id));
   if (!inv) return null;
   const evidence = await db.select().from(evidenceSources).where(eq(evidenceSources.investigationId, id)).orderBy(asc(evidenceSources.position));
   const versions = (await db.select().from(analysisVersions).where(eq(analysisVersions.investigationId, id)).orderBy(asc(analysisVersions.version))) as VersionRow[];
@@ -112,8 +138,8 @@ export async function getInvestigation(db: Db, id: string) {
  * With an extractor, the model reads all current evidence; without one (corrections), the latest reading is reused.
  * A failed model call stores nothing new, so the previous analysis stays current.
  */
-export async function analyse(db: Db, investigationId: string, trigger: Trigger, extract: Extractor | null, now = new Date()) {
-  const data = await getInvestigation(db, investigationId);
+export async function analyse(db: Db, ws: string, investigationId: string, trigger: Trigger, extract: Extractor | null, now = new Date()) {
+  const data = await getInvestigation(db, ws, investigationId);
   if (!data) return { ok: false as const, error: "This investigation no longer exists." };
   const { investigation, evidence, versions } = data;
   const latest = versions.at(-1) ?? null;
@@ -134,7 +160,7 @@ export async function analyse(db: Db, investigationId: string, trigger: Trigger,
     );
     const r = await extract(inputs, investigation.instruction);
     if (!r.ok) {
-      await db.insert(auditEvents).values({ entityType: "investigation", entityId: investigationId, eventType: "analysis.failed", payload: { trigger, error: r.error, model: r.model, latencyMs: r.latencyMs } });
+      await db.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: investigationId, eventType: "analysis.failed", payload: { trigger, error: r.error, model: r.model, latencyMs: r.latencyMs } });
       return { ok: false as const, error: r.error };
     }
     extraction = r.extraction;
@@ -172,6 +198,7 @@ export async function analyse(db: Db, investigationId: string, trigger: Trigger,
     await tx.insert(analysisVersions).values({ investigationId, version: next, trigger, evidence: used, extraction, analysis, corrections: investigation.corrections, model, latencyMs });
     await tx.update(investigations).set({ updatedAt: new Date() }).where(eq(investigations.id, investigationId));
     await tx.insert(auditEvents).values({
+      workspaceId: ws,
       entityType: "investigation",
       entityId: investigationId,
       eventType: "analysis.completed",
@@ -183,10 +210,10 @@ export async function analyse(db: Db, investigationId: string, trigger: Trigger,
 }
 
 /** Merge a correction into the investigation. The evidence and the model's reading are never edited. */
-export async function saveCorrection(db: Db, investigationId: string, patch: Corrections) {
+export async function saveCorrection(db: Db, ws: string, investigationId: string, patch: Corrections) {
   await db.transaction(async (tx) => {
-    const [inv] = await tx.select({ corrections: investigations.corrections }).from(investigations).where(eq(investigations.id, investigationId)).for("update");
-    if (!inv) throw new Error("Investigation not found");
+    const [inv] = await tx.select({ corrections: investigations.corrections }).from(investigations).where(own(ws, investigationId)).for("update");
+    if (!inv) throw new NotFound();
     const c = inv.corrections as Corrections;
     const merged: Corrections = {
       ...c,
@@ -196,15 +223,15 @@ export async function saveCorrection(db: Db, investigationId: string, patch: Cor
       decisions: { ...c.decisions, ...patch.decisions },
     };
     await tx.update(investigations).set({ corrections: merged }).where(eq(investigations.id, investigationId));
-    await tx.insert(auditEvents).values({ entityType: "investigation", entityId: investigationId, eventType: "correction.saved", payload: patch });
+    await tx.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: investigationId, eventType: "correction.saved", payload: patch });
   });
 }
 
-export async function deleteInvestigation(db: Db, investigationId: string) {
+export async function deleteInvestigation(db: Db, ws: string, investigationId: string) {
   await db.transaction(async (tx) => {
-    const deleted = await tx.delete(investigations).where(eq(investigations.id, investigationId)).returning({ id: investigations.id });
+    const deleted = await tx.delete(investigations).where(own(ws, investigationId)).returning({ id: investigations.id });
     // The audit log keeps that a deletion happened, but none of the conversation content.
-    if (deleted.length) await tx.insert(auditEvents).values({ entityType: "investigation", entityId: investigationId, eventType: "investigation.deleted", payload: null });
+    if (deleted.length) await tx.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: investigationId, eventType: "investigation.deleted", payload: null });
   });
 }
 
@@ -232,11 +259,14 @@ export function draftFromAnalysis(analysis: Analysis, now = new Date()) {
   return { draft, warnings, includedKeys: included.map((i) => i.key) };
 }
 
-export async function saveInvoiceDraftRequest(db: Db, investigationId: string, version: number, draft: InvoiceDraft, includedKeys: string[]) {
+export async function saveInvoiceDraftRequest(db: Db, ws: string, investigationId: string, version: number, draft: InvoiceDraft, includedKeys: string[]) {
   return db.transaction(async (tx) => {
+    const [inv] = await tx.select({ id: investigations.id }).from(investigations).where(own(ws, investigationId));
+    if (!inv) throw new NotFound();
     const [req] = await tx
       .insert(agentRequests)
       .values({
+        workspaceId: ws,
         investigationId,
         inputType: "image",
         rawInput: `Investigation analysis v${version}`,
@@ -245,12 +275,15 @@ export async function saveInvoiceDraftRequest(db: Db, investigationId: string, v
         validationResult: { status: "ready", draft, source: { investigationId, version, items: includedKeys } },
       })
       .returning({ id: agentRequests.id });
-    await tx.insert(auditEvents).values({ entityType: "investigation", entityId: investigationId, eventType: "action.invoice_drafted", payload: { requestId: req.id, version, items: includedKeys } });
+    await tx.insert(auditEvents).values({ workspaceId: ws, entityType: "investigation", entityId: investigationId, eventType: "action.invoice_drafted", payload: { requestId: req.id, version, items: includedKeys } });
     return req.id;
   });
 }
 
-export async function investigationForRequests(db: Db, requestIds: string[]) {
+export async function investigationForRequests(db: Db, ws: string, requestIds: string[]) {
   if (!requestIds.length) return [];
-  return db.select({ requestId: agentRequests.id, investigationId: agentRequests.investigationId }).from(agentRequests).where(inArray(agentRequests.id, requestIds));
+  return db
+    .select({ requestId: agentRequests.id, investigationId: agentRequests.investigationId })
+    .from(agentRequests)
+    .where(and(inArray(agentRequests.id, requestIds), eq(agentRequests.workspaceId, ws)));
 }

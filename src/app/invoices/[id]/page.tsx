@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
+import { currentWorkspace } from "@/lib/current-workspace";
+import { Button } from "@/components/ui/Button";
+import { OPEN_INVOICE } from "@/lib/dashboard";
+import { markInvoice } from "../actions";
 import { describeStep } from "@/lib/describe-step";
 import { ReturnLink } from "@/components/ui/BackLink";
 import { Card } from "@/components/ui/Card";
@@ -56,6 +60,10 @@ function TimelineEntry({ eventType, payload }: { eventType: string; payload: Pay
       return <p className="font-bold">Drafted from investigation analysis v{String(p.version)}</p>;
     case "invoice.created":
       return <p className="font-bold">Invoice {String(p.number)} saved</p>;
+    case "invoice.marked_paid":
+      return <p className="font-bold">You marked it as paid (your confirmation, not verified by a payment provider)</p>;
+    case "invoice.cancelled":
+      return <p className="font-bold">You cancelled it</p>;
     default:
       return <p className="font-bold">{eventType}</p>;
   }
@@ -64,7 +72,8 @@ function TimelineEntry({ eventType, payload }: { eventType: string; payload: Pay
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const data = await getInvoiceWithTimeline(db, id);
+  const ws = await currentWorkspace();
+  const data = await getInvoiceWithTimeline(db, ws.id, id);
   if (!data) notFound();
   const { invoice, items, timeline, request } = data;
   const source = (request?.validationResult as { source?: { investigationId: string; version: number } } | null)?.source;
@@ -76,10 +85,31 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         <h1 className="text-3xl font-extrabold">Invoice {invoice.number}</h1>
         <StatusBadge status={invoice.status} />
       </div>
+      {OPEN_INVOICE.includes(invoice.status) && (
+        <div className="flex flex-wrap items-center gap-3">
+          <form action={markInvoice}>
+            <input type="hidden" name="id" value={invoice.id} />
+            <input type="hidden" name="status" value="paid" />
+            <Button type="submit">Mark as paid</Button>
+          </form>
+          <form action={markInvoice}>
+            <input type="hidden" name="id" value={invoice.id} />
+            <input type="hidden" name="status" value="void" />
+            <Button type="submit" variant="secondary">Cancel invoice</Button>
+          </form>
+          <p className="text-sm text-muted">Marking it paid records your own confirmation. No payment is checked or made in this version.</p>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
         <Card className="flex flex-col gap-5">
           <dl className="grid gap-4 sm:grid-cols-3">
+            {ws.preferences.displayName && (
+              <div className="sm:col-span-3">
+                <dt className="text-sm text-muted">From</dt>
+                <dd className="font-bold">{ws.preferences.displayName}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-sm text-muted">Client</dt>
               <dd className="font-bold">{invoice.clientName}</dd>

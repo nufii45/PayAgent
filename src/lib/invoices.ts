@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { agentRequests, approvals, auditEvents, clients, invoiceItems, invoices } from "@/db/schema";
 import type { AgentStep } from "./ai/agent";
@@ -8,29 +8,30 @@ import { diffDrafts } from "./edited-draft";
 
 // All database access for the invoice flow. Every write also appends to the audit log.
 
-export async function findClients(db: Db, name: string): Promise<ClientMatch[]> {
+export async function findClients(db: Db, ws: string, name: string): Promise<ClientMatch[]> {
   const q = name.trim().toLowerCase();
   if (!q) return [];
   return db
     .select({ id: clients.id, name: clients.name, email: clients.email })
     .from(clients)
-    .where(or(sql`lower(${clients.name}) = ${q}`, sql`${q} = any(${clients.aliases})`, sql`lower(${clients.name}) like ${"%" + q + "%"}`))
+    .where(and(eq(clients.workspaceId, ws), or(sql`lower(${clients.name}) = ${q}`, sql`${q} = any(${clients.aliases})`, sql`lower(${clients.name}) like ${"%" + q + "%"}`)))
     .limit(5);
 }
 
-export async function listOpenInvoicesForClient(db: Db, clientName: string): Promise<OpenInvoice[]> {
-  const matches = await findClients(db, clientName);
+export async function listOpenInvoicesForClient(db: Db, ws: string, clientName: string): Promise<OpenInvoice[]> {
+  const matches = await findClients(db, ws, clientName);
   if (!matches.length) return [];
   return db
     .select({ number: invoices.number, currency: invoices.currency, amountCentavos: invoices.amountCentavos, dueDate: invoices.dueDate, status: invoices.status })
     .from(invoices)
-    .where(and(inArray(invoices.clientId, matches.map((m) => m.id)), notInArray(invoices.status, ["paid", "void"])))
+    .where(and(eq(invoices.workspaceId, ws), inArray(invoices.clientId, matches.map((m) => m.id)), notInArray(invoices.status, ["paid", "void"])))
     .orderBy(desc(invoices.createdAt))
     .limit(10);
 }
 
 export async function saveAgentRun(
   db: Db,
+  ws: string,
   run: {
     inputType: "text" | "image" | "voice";
     turns: string[];
@@ -45,6 +46,7 @@ export async function saveAgentRun(
     const [req] = await tx
       .insert(agentRequests)
       .values({
+        workspaceId: ws,
         inputType: run.inputType,
         rawInput: run.turns[0] ?? "",
         conversation: run.turns,
@@ -55,6 +57,7 @@ export async function saveAgentRun(
       })
       .returning({ id: agentRequests.id });
     await tx.insert(auditEvents).values({
+      workspaceId: ws,
       entityType: "agent_request",
       entityId: req.id,
       eventType: "agent.proposed",
@@ -66,9 +69,9 @@ export async function saveAgentRun(
 
 export type ApproveOutcome = { ok: true; invoiceId: string; alreadyApproved: boolean } | { ok: false; error: string };
 
-export async function approveRequest(db: Db, requestId: string, draft: InvoiceDraft): Promise<ApproveOutcome> {
+export async function approveRequest(db: Db, ws: string, requestId: string, draft: InvoiceDraft): Promise<ApproveOutcome> {
   return db.transaction(async (tx) => {
-    const [req] = await tx.select().from(agentRequests).where(eq(agentRequests.id, requestId)).for("update");
+    const [req] = await tx.select().from(agentRequests).where(and(eq(agentRequests.id, requestId), eq(agentRequests.workspaceId, ws))).for("update");
     if (!req) return { ok: false, error: "This draft no longer exists. Start a new one." };
 
     const [existing] = await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.createdFromRequestId, requestId));
@@ -83,13 +86,14 @@ export async function approveRequest(db: Db, requestId: string, draft: InvoiceDr
     const [match] = await tx
       .select({ id: clients.id })
       .from(clients)
-      .where(sql`lower(${clients.name}) = ${draft.clientName.toLowerCase()}`)
+      .where(and(eq(clients.workspaceId, ws), sql`lower(${clients.name}) = ${draft.clientName.toLowerCase()}`))
       .limit(1);
-    const clientId = match?.id ?? (await tx.insert(clients).values({ name: draft.clientName }).returning({ id: clients.id }))[0].id;
+    const clientId = match?.id ?? (await tx.insert(clients).values({ workspaceId: ws, name: draft.clientName }).returning({ id: clients.id }))[0].id;
 
     const [invoice] = await tx
       .insert(invoices)
       .values({
+        workspaceId: ws,
         clientId,
         currency: draft.currency,
         amountCentavos: draft.totalCentavos,
@@ -105,23 +109,25 @@ export async function approveRequest(db: Db, requestId: string, draft: InvoiceDr
       .values({ requestId, action: "approve", edits: edits.length ? edits : null })
       .returning({ id: approvals.id });
     await tx.insert(auditEvents).values([
-      { entityType: "approval", entityId: approval.id, eventType: "draft.approved", payload: { requestId, invoiceId: invoice.id, edits } },
-      { entityType: "invoice", entityId: invoice.id, eventType: "invoice.created", payload: { number: invoice.number, requestId, draft } },
+      { workspaceId: ws, entityType: "approval", entityId: approval.id, eventType: "draft.approved", payload: { requestId, invoiceId: invoice.id, edits } },
+      { workspaceId: ws, entityType: "invoice", entityId: invoice.id, eventType: "invoice.created", payload: { number: invoice.number, requestId, draft, investigationId: req.investigationId } },
     ]);
     return { ok: true, invoiceId: invoice.id, alreadyApproved: false };
   });
 }
 
-export async function rejectRequest(db: Db, requestId: string) {
+export async function rejectRequest(db: Db, ws: string, requestId: string) {
   return db.transaction(async (tx) => {
+    const [req] = await tx.select({ id: agentRequests.id }).from(agentRequests).where(and(eq(agentRequests.id, requestId), eq(agentRequests.workspaceId, ws)));
+    if (!req) return;
     const [existing] = await tx.select().from(approvals).where(eq(approvals.requestId, requestId));
     if (existing) return;
     const [approval] = await tx.insert(approvals).values({ requestId, action: "reject" }).returning({ id: approvals.id });
-    await tx.insert(auditEvents).values({ entityType: "approval", entityId: approval.id, eventType: "draft.rejected", payload: { requestId } });
+    await tx.insert(auditEvents).values({ workspaceId: ws, entityType: "approval", entityId: approval.id, eventType: "draft.rejected", payload: { requestId } });
   });
 }
 
-export async function listInvoices(db: Db) {
+export async function listInvoices(db: Db, ws: string) {
   return db
     .select({
       id: invoices.id,
@@ -131,14 +137,17 @@ export async function listInvoices(db: Db) {
       currency: invoices.currency,
       dueDate: invoices.dueDate,
       status: invoices.status,
+      investigationId: agentRequests.investigationId,
     })
     .from(invoices)
     .innerJoin(clients, eq(invoices.clientId, clients.id))
+    .leftJoin(agentRequests, eq(invoices.createdFromRequestId, agentRequests.id))
+    .where(eq(invoices.workspaceId, ws))
     .orderBy(desc(invoices.createdAt))
-    .limit(100);
+    .limit(200);
 }
 
-export async function getInvoiceWithTimeline(db: Db, id: string) {
+export async function getInvoiceWithTimeline(db: Db, ws: string, id: string) {
   const [invoice] = await db
     .select({
       id: invoices.id,
@@ -155,7 +164,7 @@ export async function getInvoiceWithTimeline(db: Db, id: string) {
     })
     .from(invoices)
     .innerJoin(clients, eq(invoices.clientId, clients.id))
-    .where(eq(invoices.id, id));
+    .where(and(eq(invoices.id, id), eq(invoices.workspaceId, ws)));
   if (!invoice) return null;
 
   const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
@@ -164,7 +173,44 @@ export async function getInvoiceWithTimeline(db: Db, id: string) {
     ? (await db.select({ id: approvals.id }).from(approvals).where(eq(approvals.requestId, requestId))).map((a) => a.id)
     : [];
   const entityIds = [id, ...(requestId ? [requestId] : []), ...approvalIds];
-  const timeline = await db.select().from(auditEvents).where(inArray(auditEvents.entityId, entityIds)).orderBy(asc(auditEvents.createdAt));
+  const timeline = await db.select().from(auditEvents).where(and(eq(auditEvents.workspaceId, ws), inArray(auditEvents.entityId, entityIds))).orderBy(asc(auditEvents.createdAt));
   const [request] = requestId ? await db.select().from(agentRequests).where(eq(agentRequests.id, requestId)) : [];
   return { invoice, items, timeline, request: request ?? null };
+}
+
+/** Invoice drafts that were proposed but never approved or discarded. */
+export async function listPendingDrafts(db: Db, ws: string) {
+  const rows = await db
+    .select({ id: agentRequests.id, investigationId: agentRequests.investigationId, validationResult: agentRequests.validationResult, createdAt: agentRequests.createdAt })
+    .from(agentRequests)
+    .leftJoin(approvals, eq(approvals.requestId, agentRequests.id))
+    .where(and(eq(agentRequests.workspaceId, ws), isNull(approvals.id), sql`${agentRequests.validationResult}->>'status' in ('ready', 'needs_confirmation')`))
+    .orderBy(desc(agentRequests.createdAt))
+    .limit(50);
+  return rows.map((r) => ({ ...r, draft: (r.validationResult as { draft: InvoiceDraft }).draft }));
+}
+
+export async function getPendingDraft(db: Db, ws: string, requestId: string) {
+  const [row] = (await listPendingDrafts(db, ws)).filter((d) => d.id === requestId);
+  return row ?? null;
+}
+
+export type InvoiceStatusChange = "paid" | "void";
+
+/** The user records that an invoice was paid (their own confirmation, not verified by a payment provider) or cancels it. */
+export async function setInvoiceStatus(db: Db, ws: string, id: string, status: InvoiceStatusChange) {
+  return db.transaction(async (tx) => {
+    const [inv] = await tx.select({ status: invoices.status, number: invoices.number }).from(invoices).where(and(eq(invoices.id, id), eq(invoices.workspaceId, ws))).for("update");
+    if (!inv) return false;
+    if (inv.status === status) return true;
+    await tx.update(invoices).set({ status }).where(eq(invoices.id, id));
+    await tx.insert(auditEvents).values({
+      workspaceId: ws,
+      entityType: "invoice",
+      entityId: id,
+      eventType: status === "paid" ? "invoice.marked_paid" : "invoice.cancelled",
+      payload: { number: inv.number, from: inv.status, source: "user_confirmed" },
+    });
+    return true;
+  });
 }

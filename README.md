@@ -4,7 +4,7 @@ Filipino freelancers and small businesses agree work in Messenger and Viber chat
 
 PayAgent reads the screenshots of those conversations and reconstructs the money side of the relationship: what was agreed, what changed, what was cancelled, what was promised or claimed as paid, and what is still unclear. **Every conclusion links back to the message it came from**, and nothing is billed until you approve it.
 
-- **Live demo:** _add the Vercel URL_
+- **Live demo:** https://pay-agent-flame.vercel.app (no sign-up: each visitor gets a private guest workspace)
 - **Video (3 min):** _add the video link_
 - Built for the Meta Global AI Developer Hackathon, Indie Developer track ("Build for Your World")
 
@@ -16,6 +16,8 @@ PayAgent reads the screenshots of those conversations and reconstructs the money
 4. **Add evidence later and see what changed.** When the client cancels part of the job, upload the new screenshot. PayAgent re-analyses everything and shows a diff against the previous version: "Admin dashboard: agreed → cancelled. Agreed total: ₱18,000 → ₱15,000". Every version is kept and can be opened read-only.
 5. **Fix what it got wrong.** Mark a sender as wrong, correct an amount, confirm or reject an inferred agreement. Corrections are re-applied on every later analysis, and they show as "confirmed by you", never as something the chat said.
 6. **Act on it.** Draft an invoice from the agreed items (cancelled and disputed items are left out, with a warning naming them), copy a clarification or follow-up message for the client, or save a summary. Each invoice links back to the analysis version it came from.
+
+Everything lands on a **Financial Overview** dashboard built only from your own records: investigations, potential receivables (with disputed amounts and unverified payment claims shown separately), invoices awaiting payment, and an *Attention required* list that links straight to each unresolved finding, changed agreement or draft waiting for approval. There's no sign-up: a short onboarding sets your role, currency and display name and explains how your evidence is handled.
 
 The original invoice agent is still there at `/new`: describe a job in Taglish, record a voice note, or upload a single screenshot, and get a draft invoice.
 
@@ -57,9 +59,10 @@ flowchart LR
 - **Prompt injection is treated as data.** Text inside a screenshot is evidence, never instructions.
 - **Nothing is billed without approval.** Approving is idempotent and transactional. One draft can create only one invoice.
 - **Failed analyses don't overwrite good ones.** If the model call fails, the previous version stays and you can retry.
-- **Login.** The deployed app needs a password (`APP_PASSWORD`, signed httpOnly session cookie). Without one set, it runs open and shows a "Test data only" badge.
-- **Deletion.** Deleting an investigation removes its screenshots, text and every analysis version. The audit log keeps only the fact that it was deleted, not the content.
-- **Disclosure.** Every page says that evidence is sent to Meta's Model API and stored until you delete it.
+- **Private guest workspaces, no sign-up.** On the first visit the middleware issues a random workspace id in an httpOnly cookie. Every table row carries a workspace id, and every query and server action filters by it, so another visitor's records behave exactly like missing ones (404). `src/lib/isolation.test.ts` runs the whole flow as two visitors against Postgres and checks that the second can't list, open, change, approve or delete anything of the first.
+- **Retention and deletion.** A workspace and everything in it are deleted after `GUEST_RETENTION_DAYS` (default 7) without use, with no cron job: the sweep runs on ordinary visits. Settings & Privacy deletes the whole workspace at once, and exports it as JSON first if you want. A returning visitor whose workspace expired is told so instead of seeing an unexplained empty dashboard.
+- **Disclosure before upload.** Onboarding, and the first upload, ask the visitor to acknowledge that evidence goes to Meta's Model API, how long it's kept, and that there's no account to recover it from.
+- **Spending limits on a public demo.** Model calls are limited per workspace and per network each hour, plus a global daily cap (`GUEST_HOURLY_MODEL_LIMIT`, `NETWORK_HOURLY_MODEL_LIMIT`, `MODEL_DAILY_LIMIT`). When a limit is hit, the app says so and keeps the previous analysis.
 - **Append-only audit log** for every analysis, correction, draft and approval, shown on the Activity page.
 
 ## Evaluation
@@ -69,7 +72,7 @@ flowchart LR
   - Ana, plus the cancellation screenshot: the dashboard is cancelled, total ₱15,000.
   - Ben: the price is under dispute (₱8,000 offered, ₱7,000 claimed), the ₱4,000 payment is claimed but not verified, and the recommendation is to ask for clarification.
 - `pnpm eval` runs 18 invoice-agent cases (English, Filipino, Taglish, aliases, USD, missing fields, prompt injection, 3 screenshots).
-- `pnpm test` runs 128 unit tests, including the reconciler: duplicates, self-acceptance, cancellation after completion, the version diff and corrections.
+- `pnpm test` runs 133 unit tests, including the reconciler (duplicates, self-acceptance, cancellation after completion, the version diff, corrections) and the dashboard figures. With `TEST_DATABASE_URL` set to a throwaway Postgres, it also runs the 6 workspace-isolation tests.
 
 Latest real-model results on Muse Spark 1.3 (3 Nov 2026): investigations **3/3** (23 to 54 s per case), invoice agent **17/18** on the full run, with the one miss (a client alias) passing on rerun. `pnpm smoke` passes all five checks, including Muse Voice Transcribe.
 
@@ -77,7 +80,7 @@ Latest real-model results on Muse Spark 1.3 (3 Nov 2026): investigations **3/3**
 
 All code in this repository was written on 3–4 Nov 2026 (Philippine time), inside the hackathon building period (27 Oct to 4 Nov 2026). The git history is the record: from the first commit `9e3e1e3` ("Foundation: scaffold, tokens, schema, money and date core") to the commit tagged `meta-submission`. Nothing was carried over from an earlier project.
 
-The product changed direction during the hackathon. It started as a chat-to-invoice agent (now `/new`). On 3 Nov it became conversation investigations, following the PRD in [`docs/PRD-conversation-intelligence.md`](docs/PRD-conversation-intelligence.md).
+The product changed direction during the hackathon. It started as a chat-to-invoice agent (now `/new`). On 3 Nov it became conversation investigations, following the PRD in [`docs/PRD-conversation-intelligence.md`](docs/PRD-conversation-intelligence.md). On 4 Nov the revised PRD ([`docs/PRD-v1.1.md`](docs/PRD-v1.1.md)) replaced login with private guest workspaces and added onboarding, the dashboard and Settings & Privacy.
 
 ## Run it locally
 
@@ -88,11 +91,10 @@ pnpm install
 cp .env.example .env.local
 ```
 
-Fill in `DATABASE_URL` and `META_API_KEY` in `.env.local`. Leave `APP_PASSWORD` blank to run without login. Then run:
+Fill in `DATABASE_URL` and `META_API_KEY` in `.env.local`. Then run:
 
 ```bash
 pnpm db:migrate
-pnpm db:seed
 pnpm smoke
 pnpm dev
 ```
@@ -111,8 +113,9 @@ Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 with Traccoon design to
 - `src/lib/investigations.ts`: evidence, analysis versions, corrections and invoice drafts in the database
 - `src/lib/ai/`: the invoice agent loop, tools, model provider and transcription client
 - `src/lib/money.ts`, `src/lib/amount-words.ts`, `src/lib/dates.ts`: deterministic parsing of amounts and dates
-- `src/lib/session.ts`, `src/middleware.ts`: login
-- `src/app/`: Workspace, Investigations, Invoices and Activity screens, and their server actions
+- `src/app/`: onboarding, Dashboard, Investigations, Invoices, Activity and Settings & Privacy screens, and their server actions
+- `src/middleware.ts`, `src/lib/workspaces.ts`, `src/lib/limits.ts`: guest workspaces, retention and usage limits
+- `src/lib/dashboard.ts`: dashboard figures, derived only from stored records
 - `evals/`: staged conversations, invoice cases, test screenshots and a sample voice note
 - `docs/`, `tasks.md`: product requirements and the build plan
 

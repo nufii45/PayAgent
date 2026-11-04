@@ -1,4 +1,5 @@
 import { db } from "@/db/client";
+import { currentWorkspace } from "@/lib/current-workspace";
 import { ButtonLink } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { listInvestigations } from "@/lib/investigations";
@@ -8,7 +9,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Investigations · Traccoon PayAgent" };
 
 export default async function InvestigationsPage() {
-  const rows = await listInvestigations(db);
+  const ws = await currentWorkspace();
+  const rows = await listInvestigations(db, ws.id);
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">

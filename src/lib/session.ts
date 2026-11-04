@@ -1,40 +1,29 @@
-// Single-owner login. Works in both the Edge middleware and Node (Web Crypto only).
-// If APP_PASSWORD is not set, the app runs open (local development) and shows the test-data banner.
+// Guest sessions. Each browser gets a random, unguessable workspace id in an httpOnly cookie.
+// There are no accounts: whoever holds the cookie is the workspace's owner, so the id must never be shown in URLs or logs.
+// Edge-safe (used by the middleware), so no Node or database imports here.
 
-export const SESSION_COOKIE = "pa_session";
-const SESSION_DAYS = 7;
-const enc = new TextEncoder();
+export const GUEST_COOKIE = "pa_ws";
+/** Set by the middleware on the request when it has just issued a new workspace id. */
+export const NEW_WORKSPACE_HEADER = "x-pa-new-workspace";
 
-async function hmac(secret: string, message: string) {
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(message)));
-  return btoa(String.fromCharCode(...sig)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function isWorkspaceId(value: string | undefined | null): value is string {
+  return !!value && UUID.test(value);
 }
 
-function safeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+export function retentionDays(env: Record<string, string | undefined> = process.env) {
+  const n = Number(env.GUEST_RETENTION_DAYS);
+  return Number.isInteger(n) && n >= 1 && n <= 365 ? n : 7;
 }
 
-export function authEnabled(env: Record<string, string | undefined> = process.env) {
-  return !!env.APP_PASSWORD;
-}
-
-export async function createSessionValue(password: string, now = Date.now()) {
-  const expires = now + SESSION_DAYS * 86_400_000;
-  return { value: `${expires}.${await hmac(password, `payagent-session:${expires}`)}`, expires: new Date(expires) };
-}
-
-export async function verifySessionValue(password: string, value: string | undefined, now = Date.now()) {
-  if (!value) return false;
-  const [expires, sig] = value.split(".");
-  if (!expires || !sig || Number(expires) < now) return false;
-  return safeEqual(sig, await hmac(password, `payagent-session:${expires}`));
-}
-
-export async function checkPassword(expected: string, given: string) {
-  // Compare HMACs so the comparison takes the same time whatever the input length.
-  return safeEqual(await hmac("payagent-login", expected), await hmac("payagent-login", given));
+export function guestCookieOptions(env: Record<string, string | undefined> = process.env) {
+  return {
+    httpOnly: true,
+    secure: env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    // Refreshed on every visit, so it lasts as long as the workspace's retention period after the last visit.
+    maxAge: retentionDays(env) * 86_400,
+  };
 }

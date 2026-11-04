@@ -9,6 +9,8 @@ import { inspectWav } from "@/lib/wav";
 import { validateEditedDraft, type FieldErrors } from "@/lib/edited-draft";
 import { proposalToDraft, type DraftResult } from "@/lib/invoice-schema";
 import { approveRequest, findClients, listOpenInvoicesForClient, rejectRequest, saveAgentRun } from "@/lib/invoices";
+import { clientIp, currentWorkspace } from "@/lib/current-workspace";
+import { reserveModelCall } from "@/lib/limits";
 
 export type ProposeResponse =
   | { requestId: string; result: DraftResult; steps: AgentStep[]; model: string; latencyMs: number }
@@ -27,6 +29,9 @@ export async function transcribeVoiceNote(form: FormData): Promise<{ transcript:
   const wav = inspectWav(bytes);
   if (!wav.ok) return { error: `That recording couldn't be used (${wav.error}).` };
   if (wav.info.durationMs > MAX_VOICE_MS) return { error: "Keep voice notes under 90 seconds." };
+  const ws = await currentWorkspace();
+  const budget = await reserveModelCall(db, ws.id, await clientIp(), "transcribe");
+  if (!budget.ok) return { error: budget.error };
 
   const r = await transcribe(transcribeConfigFromEnv(process.env), bytes);
   if (!r.ok) {
@@ -45,6 +50,10 @@ export async function proposeInvoice(input: { turns: string[]; imageDataUrl?: st
     return { requestId: null, result: { status: "error", error: "Use a PNG, JPG or WebP screenshot under 3 MB." }, steps: [] };
   }
 
+  const ws = await currentWorkspace();
+  const budget = await reserveModelCall(db, ws.id, await clientIp(), "invoice_agent");
+  if (!budget.ok) return { requestId: null, result: { status: "error", error: budget.error }, steps: [] };
+
   const now = new Date();
   const model = createModelClient(providerConfigFromEnv(process.env));
   const modelName = input.imageDataUrl ? model.visionModel : model.textModel;
@@ -54,8 +63,8 @@ export async function proposeInvoice(input: { turns: string[]; imageDataUrl?: st
   try {
     run = await runInvoiceAgent(model.client, modelName, { turns: agentTurns, imageDataUrl: input.imageDataUrl }, {
       now,
-      findClient: (name) => findClients(db, name),
-      listOpenInvoices: (name) => listOpenInvoicesForClient(db, name),
+      findClient: (name) => findClients(db, ws.id, name),
+      listOpenInvoices: (name) => listOpenInvoicesForClient(db, ws.id, name),
     });
   } catch (err) {
     console.error("Model call failed", err);
@@ -70,7 +79,7 @@ export async function proposeInvoice(input: { turns: string[]; imageDataUrl?: st
     ? proposalToDraft(run.proposal, now)
     : { status: "error", error: run.error };
 
-  const requestId = await saveAgentRun(db, {
+  const requestId = await saveAgentRun(db, ws.id, {
     inputType: input.imageDataUrl ? "image" : input.source === "voice" ? "voice" : "text",
     turns: agentTurns,
     model: run.model,
@@ -88,11 +97,13 @@ export async function approveDraft(requestId: string, edited: unknown): Promise<
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
   const v = validateEditedDraft(edited, today);
   if (!v.ok) return { errors: v.errors };
-  const outcome = await approveRequest(db, requestId, v.draft);
+  const ws = await currentWorkspace();
+  const outcome = await approveRequest(db, ws.id, requestId, v.draft);
   if (!outcome.ok) return { error: outcome.error };
   redirect(`/invoices/${outcome.invoiceId}`);
 }
 
 export async function rejectDraft(requestId: string) {
-  await rejectRequest(db, requestId);
+  const ws = await currentWorkspace();
+  await rejectRequest(db, ws.id, requestId);
 }
