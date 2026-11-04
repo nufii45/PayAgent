@@ -11,6 +11,9 @@ import { proposalToDraft, type DraftResult } from "@/lib/invoice-schema";
 import { approveRequest, findClients, listOpenInvoicesForClient, rejectRequest, saveAgentRun } from "@/lib/invoices";
 import { clientIp, currentWorkspace } from "@/lib/current-workspace";
 import { reserveModelCall } from "@/lib/limits";
+import { hasCurrentPrivacyAck } from "@/lib/privacy";
+
+const PRIVACY_REQUIRED = "Please read and accept the privacy note on this page before sending anything to be read.";
 
 export type ProposeResponse =
   | { requestId: string; result: DraftResult; steps: AgentStep[]; model: string; latencyMs: number }
@@ -30,6 +33,7 @@ export async function transcribeVoiceNote(form: FormData): Promise<{ transcript:
   if (!wav.ok) return { error: `That recording couldn't be used (${wav.error}).` };
   if (wav.info.durationMs > MAX_VOICE_MS) return { error: "Keep voice notes under 90 seconds." };
   const ws = await currentWorkspace();
+  if (!hasCurrentPrivacyAck(ws)) return { error: PRIVACY_REQUIRED };
   const budget = await reserveModelCall(db, ws.id, await clientIp(), "transcribe");
   if (!budget.ok) return { error: budget.error };
 
@@ -51,6 +55,7 @@ export async function proposeInvoice(input: { turns: string[]; imageDataUrl?: st
   }
 
   const ws = await currentWorkspace();
+  if (!hasCurrentPrivacyAck(ws)) return { requestId: null, result: { status: "error", error: PRIVACY_REQUIRED }, steps: [] };
   const budget = await reserveModelCall(db, ws.id, await clientIp(), "invoice_agent");
   if (!budget.ok) return { requestId: null, result: { status: "error", error: budget.error }, steps: [] };
 
@@ -58,10 +63,11 @@ export async function proposeInvoice(input: { turns: string[]; imageDataUrl?: st
   const model = createModelClient(providerConfigFromEnv(process.env));
   const modelName = input.imageDataUrl ? model.visionModel : model.textModel;
   const agentTurns = turns.length ? turns : [SCREENSHOT_ONLY_PROMPT];
+  const preferred = ws.preferences.currency ?? "PHP";
 
   let run: Awaited<ReturnType<typeof runInvoiceAgent>>;
   try {
-    run = await runInvoiceAgent(model.client, modelName, { turns: agentTurns, imageDataUrl: input.imageDataUrl }, {
+    run = await runInvoiceAgent(model.client, modelName, { turns: agentTurns, imageDataUrl: input.imageDataUrl, preferredCurrency: preferred }, {
       now,
       findClient: (name) => findClients(db, ws.id, name),
       listOpenInvoices: (name) => listOpenInvoicesForClient(db, ws.id, name),
@@ -76,7 +82,7 @@ export async function proposeInvoice(input: { turns: string[]; imageDataUrl?: st
   }
 
   const result: DraftResult | { status: "error"; error: string } = run.ok
-    ? proposalToDraft(run.proposal, now)
+    ? proposalToDraft(run.proposal, now, { preferred, turns, hasImage: !!input.imageDataUrl })
     : { status: "error", error: run.error };
 
   const requestId = await saveAgentRun(db, ws.id, {

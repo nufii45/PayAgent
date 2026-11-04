@@ -72,3 +72,42 @@ describe("proposals with gaps", () => {
     if (r.status === "needs_info") expect(r.missing).toContain("description");
   });
 });
+
+describe("proposalToDraft currency", () => {
+  const usd = { preferred: "USD" as const };
+  const proposal = (amountText: string, currency: string | null = "PHP") =>
+    InvoiceProposal.parse({ clientName: "Client A", currency, items: [{ description: "Logo", amountText }], dueDateToken: "tomorrow", notes: null, missingFields: [], question: null });
+  const currency = (r: ReturnType<typeof proposalToDraft>) => ("draft" in r ? r.draft.currency : null);
+
+  it("uses the preference when nothing names a currency, whatever the model said", () => {
+    expect(currency(proposalToDraft(proposal("2.5k", "PHP"), MON, { ...usd, turns: ["Invoice Client A 2.5k due tomorrow"] }))).toBe("USD");
+    expect(currency(proposalToDraft(proposal("2.5k", "USD"), MON, { preferred: "PHP", turns: ["Invoice Client A 2.5k due tomorrow"] }))).toBe("PHP");
+  });
+
+  it("lets an amount's own mark beat the preference, in both directions", () => {
+    expect(currency(proposalToDraft(proposal("₱2,500", "USD"), MON, usd))).toBe("PHP");
+    expect(currency(proposalToDraft(proposal("$300", "PHP"), MON, { preferred: "PHP" }))).toBe("USD");
+  });
+
+  it("reads the user's words when the model dropped the mark", () => {
+    expect(currency(proposalToDraft(proposal("2500"), MON, { ...usd, turns: ["Invoice Client A ₱2,500"] }))).toBe("PHP");
+    expect(currency(proposalToDraft(proposal("300"), MON, { preferred: "PHP", turns: ["Invoice Client A $300"] }))).toBe("USD");
+  });
+
+  it("isn't fooled by a word that only looks like a currency", () => {
+    expect(currency(proposalToDraft(proposal("2500"), MON, { ...usd, turns: ["2500 for a PHP website"] }))).toBe("USD");
+  });
+
+  it("trusts the model's reading only for a screenshot it can see and code can't", () => {
+    expect(currency(proposalToDraft(proposal("2500", "USD"), MON, { preferred: "PHP", hasImage: true }))).toBe("USD");
+    expect(currency(proposalToDraft(proposal("2500", null), MON, { ...usd, hasImage: true }))).toBe("USD");
+    expect(currency(proposalToDraft(proposal("₱2500", "USD"), MON, { preferred: "USD", hasImage: true }))).toBe("PHP");
+  });
+
+  it("uses the preference and asks when amounts name both", () => {
+    const p = { ...proposal("₱5,000"), items: [{ description: "Logo", amountText: "₱5,000" }, { description: "Hosting", amountText: "$20" }] };
+    const r = proposalToDraft(p, MON, usd);
+    expect(r).toMatchObject({ status: "needs_confirmation", draft: { currency: "USD" } });
+    expect(r.status === "needs_confirmation" && r.question).toContain("both pesos and dollars");
+  });
+});

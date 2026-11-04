@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatPeso } from "../money";
-import { diffAnalyses, messageKey, reconcile } from "./reconcile";
+import { formatMoney, formatPeso } from "../money";
+import { diffAnalyses, messageKey, reconcile, moneyText, totalsOf } from "./reconcile";
 import { Extraction } from "./schema";
 
 const now = new Date("2026-11-03T02:00:00Z");
@@ -171,5 +171,84 @@ describe("reconcile", () => {
       ],
     });
     expect(reconcile(good, [E(1), E(2)], {}, now).trustedBoxes).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("currency", () => {
+  const read = (messages: { id: string; text: string }[], events: Record<string, unknown>[]) =>
+    Extraction.parse({ clientName: "Ana", messages: messages.map((x) => m(x.id, "E1", "client", x.text)), events: events.map((e, i) => ({ id: `e${i}`, type: "offer", messageIds: ["m1"], ...e })) });
+  const agreedAt = (amountText: string, item = "logo", id = "m1") => [
+    { item, amountText, messageIds: [id] },
+    { type: "acceptance", item, messageIds: [id] },
+  ];
+  const usdRead = read([{ id: "m1", text: "Logo is $300" }], agreedAt("$300"));
+
+  it("takes the currency from the amount's own mark, over the preference", () => {
+    const a = reconcile(usdRead, [E(1)], {}, now, "PHP");
+    expect(a).toMatchObject({ currency: "USD", mixedCurrency: false });
+    expect(a.items[0].currency).toBe("USD");
+    expect(moneyText(a, "agreed", formatMoney)).toBe("$300.00");
+  });
+
+  it("reads the words around an unmarked amount", () => {
+    expect(reconcile(read([{ id: "m1", text: "Logo is $300" }], agreedAt("300")), [E(1)], {}, now, "PHP").currency).toBe("USD");
+  });
+
+  it("uses the preference when nothing names a currency", () => {
+    const a = reconcile(read([{ id: "m1", text: "Logo is 300" }], agreedAt("300")), [E(1)], {}, now, "USD");
+    expect(a.currency).toBe("USD");
+    expect(a.items[0].currency).toBe("USD");
+    expect(reconcile(read([{ id: "m1", text: "Logo is 300" }], agreedAt("300")), [E(1)], {}, now).currency).toBe("PHP");
+  });
+
+  it("gives unmarked amounts the currency the conversation names", () => {
+    const a = reconcile(read([{ id: "m1", text: "Logo is $300" }, { id: "m2", text: "Hosting is 50" }], [...agreedAt("$300"), ...agreedAt("50", "hosting", "m2")]), [E(1)], {}, now, "PHP");
+    expect(a.items.map((i) => i.currency)).toEqual(["USD", "USD"]);
+    expect(moneyText(a, "agreed", formatMoney)).toBe("$350.00");
+  });
+
+  it("keeps totals apart and asks for a check when a conversation mixes currencies", () => {
+    const a = reconcile(
+      read(
+        [{ id: "m1", text: "Logo is ₱5,000" }, { id: "m2", text: "Hosting is $20" }, { id: "m3", text: "Sent ₱1,000" }, { id: "m4", text: "Sent $5" }],
+        [...agreedAt("₱5,000"), ...agreedAt("$20", "hosting", "m2"), { type: "payment_claim", amountText: "₱1,000", messageIds: ["m3"] }, { type: "payment_claim", amountText: "$5", messageIds: ["m4"] }],
+      ),
+      [E(1)],
+      {},
+      now,
+      "USD",
+    );
+    expect(a).toMatchObject({ currency: "USD", mixedCurrency: true });
+    expect(moneyText(a, "agreed", formatMoney)).toBe("₱5,000.00 and $20.00");
+    expect(moneyText(a, "balance", formatMoney)).toBe("₱4,000.00 and $15.00");
+    expect(a.findings.find((f) => f.id === "issue:currency")).toMatchObject({ title: "This conversation mentions both pesos and dollars", detail: "Check the amounts.", needsReview: true });
+    const claim = a.findings.find((f) => f.id === "payment:claimed")!;
+    expect(claim.amountCentavos).toBeNull();
+    expect(claim.detail).toContain("₱1,000.00 and $5.00");
+    expect(a.summary.recommendedAction).toBe("clarify");
+  });
+
+  it("doesn't compare a claim in one currency with an agreement in the other", () => {
+    const a = reconcile(
+      read([{ id: "m1", text: "Logo is ₱5,000" }, { id: "m2", text: "Sent $9,000" }], [...agreedAt("₱5,000"), { type: "payment_claim", amountText: "$9,000", messageIds: ["m2"] }]),
+      [E(1)],
+      { decisions: { "issue:currency": "confirmed", "payment:claimed": "confirmed" } },
+      now,
+    );
+    expect(a.summary.recommendedAction).not.toBe("save_summary");
+  });
+
+  it("shows an analysis from before currencies were tracked in pesos", () => {
+    const old = v1();
+    delete old.currency;
+    delete old.summary.totals;
+    expect(moneyText(old, "agreed", formatMoney)).toBe(formatPeso(old.summary.agreedTotalCentavos));
+    expect(totalsOf(old)[0]).toMatchObject({ currency: "PHP", agreed: old.summary.agreedTotalCentavos, promised: old.summary.promisedCentavos });
+  });
+
+  it("reports a change of currency in the diff", () => {
+    const pesos = reconcile(read([{ id: "m1", text: "Logo is ₱300" }], agreedAt("₱300")), [E(1)], {}, now);
+    const changes = diffAnalyses(pesos, reconcile(usdRead, [E(1)], {}, now), formatMoney);
+    expect(changes.find((c) => c.title === "Agreed total")).toMatchObject({ before: "₱300.00", after: "$300.00" });
   });
 });

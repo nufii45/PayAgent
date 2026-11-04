@@ -11,7 +11,11 @@ import * as schema from "./schema";
 export function createDb(url: string): Db {
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || url.includes("host=/");
   if (local) return drizzlePg(new PgPool({ connectionString: url }), { schema });
-  return drizzleNeon(new NeonPool({ connectionString: url }), { schema }) as unknown as Db;
+  // The default 10 s idle timeout made the next click after a pause reconnect, which costs about a second. Neon's
+  // compute suspends after 5 minutes, so stay just under that. Dropped idle connections must not crash the process.
+  const pool = new NeonPool({ connectionString: url, idleTimeoutMillis: 4 * 60_000 });
+  pool.on("error", (err: Error) => console.error("Idle database connection dropped", err.message));
+  return drizzleNeon(pool, { schema }) as unknown as Db;
 }
 
 export type Db = NodePgDatabase<typeof schema>;

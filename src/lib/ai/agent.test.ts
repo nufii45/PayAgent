@@ -1,6 +1,6 @@
 import { cleanClientName } from "./tools";
 import { describe, expect, it, vi } from "vitest";
-import { extractJson, runInvoiceAgent } from "./agent";
+import { extractJson, runInvoiceAgent, systemPrompt } from "./agent";
 import type { ToolDeps } from "./tools";
 
 const NOW = new Date("2026-11-02T02:00:00Z");
@@ -124,5 +124,12 @@ describe("cleanClientName", () => {
     ["the", "the"],
   ])("%s → %s", (input, out) => {
     expect(cleanClientName(input)).toBe(out);
+  });
+});
+
+describe("systemPrompt", () => {
+  it("defaults to the workspace's preferred currency", () => {
+    expect(systemPrompt(NOW, "USD")).toContain("If none is named, use USD");
+    expect(systemPrompt(NOW)).toContain("If none is named, use PHP");
   });
 });

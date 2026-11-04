@@ -86,18 +86,18 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         <StatusBadge status={invoice.status} />
       </div>
       {OPEN_INVOICE.includes(invoice.status) && (
-        <div className="flex flex-wrap items-center gap-3">
-          <form action={markInvoice}>
-            <input type="hidden" name="id" value={invoice.id} />
-            <input type="hidden" name="status" value="paid" />
-            <Button type="submit">Mark as paid</Button>
-          </form>
+        <div className="tr-action-bar tr-action-bar--flow">
+          <p className="text-sm text-muted sm:min-w-0 sm:flex-1">Marking it paid records your own confirmation. No payment is checked or made in this version.</p>
           <form action={markInvoice}>
             <input type="hidden" name="id" value={invoice.id} />
             <input type="hidden" name="status" value="void" />
-            <Button type="submit" variant="secondary">Cancel invoice</Button>
+            <Button type="submit" variant="secondary" className="w-full sm:w-auto">Cancel invoice</Button>
           </form>
-          <p className="text-sm text-muted">Marking it paid records your own confirmation. No payment is checked or made in this version.</p>
+          <form action={markInvoice}>
+            <input type="hidden" name="id" value={invoice.id} />
+            <input type="hidden" name="status" value="paid" />
+            <Button type="submit" className="w-full sm:w-auto">Mark as paid</Button>
+          </form>
         </div>
       )}
 

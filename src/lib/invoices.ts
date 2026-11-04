@@ -167,14 +167,14 @@ export async function getInvoiceWithTimeline(db: Db, ws: string, id: string) {
     .where(and(eq(invoices.id, id), eq(invoices.workspaceId, ws)));
   if (!invoice) return null;
 
-  const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
   const requestId = invoice.createdFromRequestId;
-  const approvalIds = requestId
-    ? (await db.select({ id: approvals.id }).from(approvals).where(eq(approvals.requestId, requestId))).map((a) => a.id)
-    : [];
-  const entityIds = [id, ...(requestId ? [requestId] : []), ...approvalIds];
+  const [items, approvalRows, [request]] = await Promise.all([
+    db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id)),
+    requestId ? db.select({ id: approvals.id }).from(approvals).where(eq(approvals.requestId, requestId)) : [],
+    requestId ? db.select().from(agentRequests).where(eq(agentRequests.id, requestId)) : [],
+  ]);
+  const entityIds = [id, ...(requestId ? [requestId] : []), ...approvalRows.map((a) => a.id)];
   const timeline = await db.select().from(auditEvents).where(and(eq(auditEvents.workspaceId, ws), inArray(auditEvents.entityId, entityIds))).orderBy(asc(auditEvents.createdAt));
-  const [request] = requestId ? await db.select().from(agentRequests).where(eq(agentRequests.id, requestId)) : [];
   return { invoice, items, timeline, request: request ?? null };
 }
 

@@ -67,6 +67,7 @@
   --tr-color-control-shadow: var(--tr-brand-outline);
   --tr-color-action: var(--tr-brand-charcoal);
   --tr-color-on-action: var(--tr-brand-paper);
+  --tr-color-on-action-muted: var(--tr-brand-border);
   --tr-color-action-hover: var(--tr-brand-outline);
   --tr-color-disabled: var(--tr-brand-muted);
   --tr-color-on-disabled: var(--tr-brand-charcoal);
@@ -90,6 +91,7 @@
   --color-line: var(--tr-color-border);
   --color-action: var(--tr-color-action);
   --color-on-action: var(--tr-color-on-action);
+  --color-on-action-muted: var(--tr-color-on-action-muted);
   --color-success: var(--tr-color-success);
   --color-success-bg: var(--tr-color-success-bg);
   --color-warning: var(--tr-color-warning);
@@ -113,6 +115,8 @@
     font-family: var(--tr-font-ui);
     font-size: 1rem;
     line-height: 1.5;
+    /* viewport-fit=cover: keep content clear of the notch in landscape. */
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
   }
   ::selection {
     background: var(--tr-color-text);
@@ -158,8 +162,11 @@
       box-shadow var(--tr-motion-fast) var(--tr-motion-ease),
       background var(--tr-motion-fast) var(--tr-motion-ease);
   }
-  .tr-button:not(:disabled):not([aria-disabled="true"]):hover {
-    background: var(--tr-color-action-hover);
+  /* Hover only where it's real: on touch it sticks and paints whatever lands under the finger on the next step. */
+  @media (hover: hover) {
+    .tr-button:not(:disabled):not([aria-disabled="true"]):hover {
+      background: var(--tr-color-action-hover);
+    }
   }
   .tr-button:not(:disabled):not([aria-disabled="true"]):active {
     transform: translateY(var(--tr-button-press-distance));
@@ -181,8 +188,196 @@
     color: var(--tr-color-text);
     background: var(--tr-color-surface);
   }
-  .tr-button--secondary:not(:disabled):not([aria-disabled="true"]):hover {
+  @media (hover: hover) {
+    .tr-button--secondary:not(:disabled):not([aria-disabled="true"]):hover {
+      background: var(--tr-color-page);
+    }
+  }
+
+  .tr-button--danger:not(:disabled) {
+    background: var(--tr-color-danger);
+    border-color: var(--tr-color-danger);
+  }
+  @media (hover: hover) {
+    .tr-button--danger:not(:disabled):not([aria-disabled="true"]):hover {
+      background: color-mix(in srgb, var(--tr-color-danger) 85%, var(--tr-color-text));
+    }
+  }
+
+  /* A large tactile choice (start options). Same press behaviour as .tr-button. */
+  .tr-choice {
+    display: flex;
+    flex-direction: column;
+    gap: var(--tr-space-2);
+    inline-size: 100%;
+    padding: var(--tr-space-5);
+    font: inherit;
+    text-align: start;
+    text-decoration: none;
+    color: var(--tr-color-text);
+    background: var(--tr-color-surface);
+    border: var(--tr-stroke-control) solid var(--tr-color-control-border);
+    border-radius: var(--tr-radius-card);
+    box-shadow: 0 var(--tr-button-shadow-distance) 0 var(--tr-color-control-shadow);
+    cursor: pointer;
+    transition:
+      transform var(--tr-motion-fast) var(--tr-motion-ease),
+      box-shadow var(--tr-motion-fast) var(--tr-motion-ease),
+      background var(--tr-motion-fast) var(--tr-motion-ease);
+  }
+  @media (hover: hover) {
+    .tr-choice:not(:disabled):hover {
+      background: var(--tr-color-page);
+    }
+  }
+  .tr-choice:not(:disabled):active {
+    transform: translateY(var(--tr-button-press-distance));
+    box-shadow: 0 calc(var(--tr-button-shadow-distance) - var(--tr-button-press-distance)) 0 var(--tr-color-control-shadow);
+  }
+  .tr-choice--strong {
+    color: var(--tr-color-on-action);
+    background: var(--tr-color-action);
+  }
+  @media (hover: hover) {
+    .tr-choice--strong:not(:disabled):hover {
+      background: var(--tr-color-action-hover);
+    }
+  }
+
+  /* Two or more views of one panel. Selected is filled and bold, so it doesn't rely on color alone. */
+  .tr-tabs {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: var(--tr-space-1);
+    padding: var(--tr-space-1);
     background: var(--tr-color-page);
+    border: var(--tr-stroke-hairline) solid var(--tr-color-border);
+    border-radius: var(--tr-radius-control);
+  }
+  .tr-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--tr-space-2);
+    min-block-size: var(--tr-control-min-target);
+    padding: var(--tr-space-2) var(--tr-space-3);
+    font: inherit;
+    font-weight: 600;
+    color: var(--tr-color-text-muted);
+    border-radius: var(--tr-radius-sm);
+    cursor: pointer;
+    transition:
+      background var(--tr-motion-fast) var(--tr-motion-ease),
+      color var(--tr-motion-fast) var(--tr-motion-ease);
+  }
+  .tr-tab:hover {
+    color: var(--tr-color-text);
+    background: var(--tr-color-surface);
+  }
+  .tr-tab[aria-selected="true"] {
+    font-weight: var(--tr-font-button-weight);
+    color: var(--tr-color-on-action);
+    background: var(--tr-color-action);
+  }
+
+  .tr-spinner {
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+    border: var(--tr-stroke-control) solid var(--tr-color-border);
+    border-block-start-color: var(--tr-color-text);
+    border-radius: var(--tr-radius-pill);
+    animation: tr-spin 800ms linear infinite;
+  }
+
+  /* Step actions. On phones they stay pinned above the browser toolbar and the home indicator. */
+  .tr-action-bar {
+    position: sticky;
+    inset-block-end: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: var(--tr-space-3);
+    margin-inline: calc(var(--tr-space-4) * -1);
+    padding: var(--tr-space-3) var(--tr-space-4) calc(var(--tr-space-3) + env(safe-area-inset-bottom));
+    background: var(--tr-color-page);
+    border-block-start: var(--tr-stroke-hairline) solid var(--tr-color-border);
+  }
+  .tr-action-bar > * {
+    inline-size: 100%;
+  }
+  /* Same arrangement, kept in the page flow: every form and dialog footer. The sticky bar is for steps whose action must stay in reach. */
+  .tr-action-bar--flow {
+    position: static;
+    margin-inline: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+  }
+  /* Back plus primary: one row at every size, the primary taking the rest on phones. */
+  .tr-action-bar--with-back {
+    flex-direction: row;
+  }
+  .tr-action-bar--with-back > * {
+    inline-size: auto;
+  }
+  .tr-action-bar--with-back > :last-child {
+    flex: 1 1 auto;
+  }
+  /* The global rule: from sm up, actions sit at the right end, primary last. Children stay in visual order, so Tab matches what's seen. */
+  @media (min-width: 40rem) {
+    .tr-action-bar--with-back > :last-child {
+      flex: 0 0 auto;
+    }
+    .tr-action-bar {
+      position: static;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      margin-inline: 0;
+      padding: 0;
+      background: none;
+      border: 0;
+    }
+    .tr-action-bar > * {
+      inline-size: auto;
+    }
+    /* The exception: a hero's actions belong to its text column. */
+    .tr-action-bar--start {
+      justify-content: flex-start;
+    }
+  }
+
+  /* A bottom sheet on phones, centered from sm up. The native <dialog> handles focus, Esc and the top layer. */
+  .tr-dialog {
+    inline-size: 100%;
+    max-inline-size: 100%;
+    max-block-size: calc(100dvh - var(--tr-space-8));
+    margin: auto 0 0;
+    padding: var(--tr-space-5);
+    padding-block-end: calc(var(--tr-space-5) + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    color: var(--tr-color-text);
+    background: var(--tr-color-surface);
+    border: var(--tr-stroke-card) solid var(--tr-color-border);
+    border-block-end-width: 0;
+    border-radius: var(--tr-radius-card) var(--tr-radius-card) 0 0;
+  }
+  .tr-dialog::backdrop {
+    background: color-mix(in srgb, var(--tr-color-text) 45%, transparent);
+  }
+  @media (min-width: 40rem) {
+    .tr-dialog {
+      max-inline-size: 30rem;
+      margin: auto;
+      padding: var(--tr-space-6);
+      border-block-end-width: var(--tr-stroke-card);
+      border-radius: var(--tr-radius-card);
+    }
+  }
+  html:has(.tr-dialog[open]) {
+    overflow: hidden;
   }
 
   .tr-input {
@@ -196,11 +391,37 @@
     border-radius: var(--tr-radius-control);
     transition: border-color var(--tr-motion-base) var(--tr-motion-ease);
   }
-  .tr-input:hover {
+  @media (hover: hover) {
+    .tr-input:hover {
+      border-color: var(--tr-color-control-border);
+    }
+  }
+  .tr-input:focus {
     border-color: var(--tr-color-control-border);
+  }
+  /* One ring outside a quiet border, lighter than the page-wide focus style: fields sit close together. */
+  .tr-input:focus-visible {
+    border-color: var(--tr-color-border);
+    outline: var(--tr-stroke-control) solid var(--tr-color-focus);
+    outline-offset: var(--tr-stroke-control);
   }
   .tr-input[aria-invalid="true"] {
     border-color: var(--tr-color-danger);
+  }
+  /* A native select with our own chevron (see SelectField). The popup stays the browser's. */
+  .tr-select {
+    appearance: none;
+    padding-inline-end: calc(var(--tr-space-3) + 18px + var(--tr-space-2));
+    text-overflow: ellipsis;
+  }
+  .tr-select:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@keyframes tr-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -211,7 +432,11 @@
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
-  .tr-button:not(:disabled):active {
+  .tr-spinner {
+    animation: none;
+  }
+  .tr-button:not(:disabled):active,
+  .tr-choice:not(:disabled):active {
     transform: none;
   }
 }

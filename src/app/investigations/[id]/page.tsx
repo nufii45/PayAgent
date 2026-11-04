@@ -5,10 +5,10 @@ import { InvestigationView } from "@/components/investigation/InvestigationView"
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatDate } from "@/lib/dates";
 import { clarificationMessage, followUpMessage } from "@/lib/investigation/messages";
-import { STATUS_LABEL, diffAnalyses, type Analysis } from "@/lib/investigation/reconcile";
+import { STATUS_LABEL, diffAnalyses, moneyText, type Analysis } from "@/lib/investigation/reconcile";
 import { getInvestigation } from "@/lib/investigations";
 import { currentWorkspace } from "@/lib/current-workspace";
-import { formatPeso } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { RetryAnalysis } from "./RetryAnalysis";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +19,12 @@ function summaryText(title: string, a: Analysis, version: number) {
   const lines = [`${title} (analysis v${version})`, s.clientName ? `Client: ${s.clientName}` : "Client: not named in the evidence", ""];
   for (const i of a.items) {
     const amount = i.agreedCentavos ?? i.affectedCentavos ?? i.proposedCentavos;
-    lines.push(`- ${i.label}: ${STATUS_LABEL[i.status]}${amount != null ? `, ${formatPeso(amount)}` : ""}`);
+    lines.push(`- ${i.label}: ${STATUS_LABEL[i.status]}${amount != null ? `, ${formatMoney(amount, i.currency)}` : ""}`);
   }
-  lines.push("", `Agreed total: ${formatPeso(s.agreedTotalCentavos)}`);
-  if (s.promisedCentavos) lines.push(`Promised (not paid): ${formatPeso(s.promisedCentavos)}`);
-  if (s.claimedCentavos) lines.push(`Client says paid (not verified): ${formatPeso(s.claimedCentavos)}`);
-  lines.push(`Verified payments: ${formatPeso(s.verifiedCentavos)}`);
+  lines.push("", `Agreed total: ${moneyText(a, "agreed", formatMoney)}`);
+  if (s.promisedCentavos) lines.push(`Promised (not paid): ${moneyText(a, "promised", formatMoney)}`);
+  if (s.claimedCentavos) lines.push(`Client says paid (not verified): ${moneyText(a, "claimed", formatMoney)}`);
+  lines.push(`Verified payments: ${formatMoney(s.verifiedCentavos, a.currency)}`);
   if (s.dueDate) lines.push(`Due: ${formatDate(s.dueDate)}`);
   const open = a.findings.filter((f) => f.needsReview);
   if (open.length) lines.push("", "Still to resolve:", ...open.map((f) => `- ${f.title}`));
@@ -78,10 +78,10 @@ export default async function InvestigationPage({ params, searchParams }: { para
           evidenceMap: current.evidence,
         }}
         isLatest={current.version === latest.version}
-        changes={previous ? diffAnalyses(previous.analysis!, analysis, formatPeso) : null}
+        changes={previous ? diffAnalyses(previous.analysis!, analysis, formatMoney) : null}
         previousVersion={previous?.version ?? null}
-        clarification={clarificationMessage(analysis, formatPeso)}
-        followUp={followUpMessage(analysis, formatPeso)}
+        clarification={clarificationMessage(analysis, formatMoney)}
+        followUp={followUpMessage(analysis, formatMoney)}
         summaryText={summaryText(investigation.title, analysis, current.version)}
       />
     </div>

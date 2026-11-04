@@ -93,9 +93,11 @@ export function NewInvoice() {
               />
               {imageError && <p className="text-sm font-semibold text-danger">{imageError}</p>}
             </div>
-            <Button type="submit" loading={pending} loadingLabel="Drafting…" disabled={!text.trim() && !image} className="self-start">
-              Draft invoice
-            </Button>
+            <div className="tr-action-bar tr-action-bar--flow">
+              <Button type="submit" loading={pending} loadingLabel="Drafting…" disabled={!text.trim() && !image}>
+                Draft invoice
+              </Button>
+            </div>
           </form>
         ) : (
           <div className="flex flex-col gap-3">
@@ -108,9 +110,11 @@ export function NewInvoice() {
             ))}
             {/* eslint-disable-next-line @next/next/no-img-element -- local data URL preview */}
             {image && <img src={image} alt="The chat screenshot you uploaded" className="max-h-96 w-full rounded-control border-2 border-line object-contain" />}
-            <Button variant="secondary" onClick={reset} disabled={pending} className="self-start">
-              Start over
-            </Button>
+            <div className="tr-action-bar tr-action-bar--flow">
+              <Button variant="secondary" onClick={reset} disabled={pending}>
+                Start over
+              </Button>
+            </div>
           </div>
         )}
       </Card>
@@ -121,22 +125,26 @@ export function NewInvoice() {
           {pending && <Working hasImage={!!image} />}
 
           {!pending && result?.status === "error" && (
-            <div className="flex flex-col items-start gap-3">
+            <div className="flex flex-col gap-3">
               <p role="alert" className="font-semibold text-danger">
                 {result.error}
               </p>
-              <Button onClick={() => run(turns)}>Try again</Button>
+              <div className="tr-action-bar tr-action-bar--flow">
+                <Button onClick={() => run(turns)}>Try again</Button>
+              </div>
             </div>
           )}
 
           {!pending && result?.status === "invalid" && (
-            <div className="flex flex-col items-start gap-3">
+            <div className="flex flex-col gap-3">
               <p role="alert" className="font-semibold text-danger">
                 Some details couldn&apos;t be read: {result.errors.join("; ")}
               </p>
-              <Button variant="secondary" onClick={reset}>
-                Start over
-              </Button>
+              <div className="tr-action-bar tr-action-bar--flow">
+                <Button variant="secondary" onClick={reset}>
+                  Start over
+                </Button>
+              </div>
             </div>
           )}
 
@@ -152,9 +160,11 @@ export function NewInvoice() {
               }}
             >
               <TextField label={result.question} value={answer} onChange={(e) => setAnswer(e.target.value)} autoFocus />
-              <Button type="submit" className="self-start" disabled={!answer.trim()}>
-                Send answer
-              </Button>
+              <div className="tr-action-bar tr-action-bar--flow">
+                <Button type="submit" disabled={!answer.trim()}>
+                  Send answer
+                </Button>
+              </div>
             </form>
           )}
 

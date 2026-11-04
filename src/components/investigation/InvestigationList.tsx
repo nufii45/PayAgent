@@ -1,20 +1,22 @@
 import Link from "next/link";
 import { investigationStatus, type InvestigationRow, type InvestigationStatus } from "@/lib/dashboard";
-import { formatPeso } from "@/lib/money";
+import { moneyText } from "@/lib/investigation/reconcile";
+import { formatMoney } from "@/lib/money";
+import { StatusLabel, type StatusTone } from "@/components/ui/StatusLabel";
 
 const date = new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeZone: "Asia/Manila" });
 
-const STATUS_STYLE: Record<InvestigationStatus, string> = {
-  Analyzing: "bg-page text-muted border-line",
-  "Not analysed": "bg-page text-muted border-line",
-  "Analysis failed": "bg-danger-bg text-danger border-danger",
-  "Needs clarification": "bg-warning-bg text-warning border-warning",
-  "Ready for review": "bg-warning-bg text-warning border-warning",
-  "Up to date": "bg-success-bg text-success border-success",
+const STATUS_TONE: Record<InvestigationStatus, StatusTone> = {
+  Analyzing: "neutral",
+  "Not analysed": "neutral",
+  "Analysis failed": "danger",
+  "Needs clarification": "warning",
+  "Ready for review": "warning",
+  "Up to date": "success",
 };
 
 export function InvestigationStatusBadge({ status }: { status: InvestigationStatus }) {
-  return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-sm font-bold whitespace-nowrap ${STATUS_STYLE[status]}`}>{status}</span>;
+  return <StatusLabel tone={STATUS_TONE[status]}>{status}</StatusLabel>;
 }
 
 export function InvestigationList({ rows }: { rows: InvestigationRow[] }) {
@@ -34,7 +36,7 @@ export function InvestigationList({ rows }: { rows: InvestigationRow[] }) {
                   {a && a.summary.reviewCount > 0 ? ` · ${a.summary.reviewCount} unresolved` : ""}
                 </span>
               </span>
-              <span className="font-bold tabular-nums sm:text-right">{a && a.summary.agreedTotalCentavos > 0 ? formatPeso(a.summary.agreedTotalCentavos) : "—"}</span>
+              <span className="font-bold tabular-nums sm:text-right">{a && a.summary.agreedTotalCentavos > 0 ? moneyText(a, "agreed", formatMoney) : "—"}</span>
               <span className="sm:text-right">
                 <InvestigationStatusBadge status={status} />
               </span>

@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { createModelClient, providerConfigFromEnv } from "@/lib/ai/provider";
-import { extractConversation } from "@/lib/investigation/extract";
+import { extractConversation, modelFailureMessage } from "@/lib/investigation/extract";
 import type { Corrections } from "@/lib/investigation/reconcile";
 import type { InvoiceDraft } from "@/lib/invoice-schema";
 import { clientIp, currentWorkspace } from "@/lib/current-workspace";
 import { reserveModelCall } from "@/lib/limits";
-import { acknowledgePrivacy } from "@/lib/workspaces";
+import { hasCurrentPrivacyAck } from "@/lib/privacy";
+import { markOnboarded } from "@/lib/workspaces";
 import {
   NotFound,
   addEvidence,
@@ -41,10 +42,12 @@ async function extractor(ws: string): Promise<Extractor> {
     return extractConversation(m.client, m.visionModel, { evidence, instruction }).catch((err) => {
       // Log the failure only, never the conversation content.
       console.error("Investigation model call failed", err instanceof Error ? err.message : err);
-      return { ok: false as const, error: "The AI model didn't respond in time. Your evidence is saved; try the analysis again.", model: m.visionModel, latencyMs: 0 };
+      return { ok: false as const, error: modelFailureMessage(err), model: m.visionModel, latencyMs: 0 };
     });
   };
 }
+
+const PRIVACY_REQUIRED = "Please read and accept the privacy note before sending a conversation. Open New investigation to see it.";
 
 const notFound = (err: unknown) => {
   if (err instanceof NotFound) return { error: err.message };
@@ -60,12 +63,10 @@ function checkEvidence(input: { images: string[]; texts: string[] }): { evidence
   return { evidence: [...images.map((dataUrl) => ({ kind: "image" as const, dataUrl })), ...texts.map((text) => ({ kind: "text" as const, text }))] };
 }
 
-export async function startInvestigation(input: { title: string; instruction: string; images: string[]; texts: string[]; acknowledged?: boolean }): Promise<{ error: string; id?: string }> {
+export async function startInvestigation(input: { title: string; instruction: string; images: string[]; texts: string[] }): Promise<{ error: string; id?: string }> {
   const ws = await currentWorkspace();
-  if (!ws.privacyAcknowledgedAt) {
-    if (!input.acknowledged) return { error: "Please confirm the privacy note above before uploading a conversation." };
-    await acknowledgePrivacy(db, ws.id);
-  }
+  if (!hasCurrentPrivacyAck(ws)) return { error: PRIVACY_REQUIRED };
+  if (!ws.onboardedAt) await markOnboarded(db, ws.id);
   const checked = checkEvidence(input);
   if ("error" in checked) return { error: checked.error };
   if (!checked.evidence.length) return { error: "Add at least one screenshot or paste the conversation." };
@@ -83,6 +84,7 @@ export async function addEvidenceAndReanalyse(id: string, input: { images: strin
   const checked = checkEvidence(input);
   if ("error" in checked) return { error: checked.error };
   const ws = await currentWorkspace();
+  if (!hasCurrentPrivacyAck(ws)) return { error: PRIVACY_REQUIRED };
   let result: Awaited<ReturnType<typeof addEvidence>>;
   try {
     result = await addEvidence(db, ws.id, id, checked.evidence);
@@ -147,7 +149,7 @@ export async function draftInvoice(id: string): Promise<{ error: string } | { re
   const data = await getInvestigation(db, ws.id, id);
   const latest = data?.versions.at(-1);
   if (!latest?.analysis) return { error: "Run the analysis first." };
-  const { draft, warnings, includedKeys } = draftFromAnalysis(latest.analysis);
+  const { draft, warnings, includedKeys } = draftFromAnalysis(latest.analysis, undefined, { preferred: ws.preferences.currency });
   if (!draft.items.length) return { error: "Nothing has a supported agreed price yet. Resolve the items marked for review, or send a clarification message." };
   const requestId = await saveInvoiceDraftRequest(db, ws.id, id, latest.version, draft, includedKeys);
   return { requestId, draft, warnings };

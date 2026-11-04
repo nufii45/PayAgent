@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db/client";
 import { currentWorkspace } from "@/lib/current-workspace";
 import { GUEST_COOKIE } from "@/lib/session";
-import { deleteWorkspace, dismissExpiredNotice, restartOnboarding, savePreferences, type BusinessRole, type Preferences } from "@/lib/workspaces";
+import { acknowledgePrivacy, deleteWorkspace, dismissExpiredNotice, savePreferences, type BusinessRole, type Preferences } from "@/lib/workspaces";
 
 const ROLES: BusinessRole[] = ["freelancer", "small_business", "agency", "other"];
 
@@ -15,37 +15,37 @@ function readPreferences(form: FormData): Preferences {
   const currency = String(form.get("currency") ?? "");
   const displayName = String(form.get("displayName") ?? "").trim().slice(0, 80);
   return {
-    ...(ROLES.includes(role as BusinessRole) ? { role: role as BusinessRole } : {}),
+    // Saved by merging, so "Not set" has to be stored or the old role would come back.
+    ...(ROLES.includes(role as BusinessRole) ? { role: role as BusinessRole } : role === "" && form.has("role") ? { role: null } : {}),
     ...(currency === "PHP" || currency === "USD" ? { currency } : {}),
     ...(form.has("displayName") ? { displayName } : {}),
   };
 }
 
-/** Last onboarding step. Preferences may be empty (skipped); the privacy note must be acknowledged. */
-export async function finishOnboarding(form: FormData) {
+/** The user ticked the privacy note and pressed Continue. Recorded before any evidence can be sent. */
+export async function acknowledgePrivacyNow(opts: { onboarded?: boolean } = {}) {
   const ws = await currentWorkspace();
-  await savePreferences(db, ws.id, readPreferences(form), { onboarded: true, acknowledgePrivacy: form.get("acknowledge") === "on" });
-  redirect("/");
+  await acknowledgePrivacy(db, ws.id, { onboarded: !!opts.onboarded });
 }
 
-/** "Explore workspace": straight to the dashboard. The privacy note is asked again before the first upload. */
+/** Hides the "Make invoices yours" prompt on the dashboard. The same fields stay in Settings & Privacy. */
+export async function dismissProfilePrompt() {
+  const ws = await currentWorkspace();
+  await savePreferences(db, ws.id, { profilePromptDismissed: true });
+  revalidatePath("/");
+}
+
+/** "Explore dashboard": straight to the dashboard. The privacy note is asked before the first upload. */
 export async function skipOnboarding() {
   const ws = await currentWorkspace();
   await savePreferences(db, ws.id, {}, { onboarded: true });
   redirect("/");
 }
 
-export async function updatePreferences(_prev: { saved?: boolean } | null, form: FormData): Promise<{ saved: boolean }> {
+export async function updatePreferences(form: FormData) {
   const ws = await currentWorkspace();
   await savePreferences(db, ws.id, readPreferences(form));
   revalidatePath("/", "layout");
-  return { saved: true };
-}
-
-export async function restartWelcome() {
-  const ws = await currentWorkspace();
-  await restartOnboarding(db, ws.id);
-  redirect("/welcome");
 }
 
 export async function dismissExpired() {
@@ -56,7 +56,7 @@ export async function dismissExpired() {
 
 /** Deletes everything in this guest workspace and starts the visitor on a new, empty one. */
 export async function deleteMyWorkspace(form: FormData) {
-  if (form.get("confirm") !== "on") redirect("/settings?error=confirm");
+  if (form.get("confirm") !== "DELETE") throw new Error("Workspace deletion wasn't confirmed");
   const ws = await currentWorkspace();
   await deleteWorkspace(db, ws.id);
   (await cookies()).delete(GUEST_COOKIE);

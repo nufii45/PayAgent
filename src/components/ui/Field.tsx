@@ -1,4 +1,4 @@
-import { useId, type InputHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useId, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 type Common = { label: string; hint?: string; error?: string };
 
@@ -32,6 +32,20 @@ export function TextField({ label, hint, error, ...rest }: Common & InputHTMLAtt
   return (
     <FieldShell id={id} label={label} hint={hint} error={error}>
       <input {...rest} id={id} className="tr-input" aria-invalid={!!error || undefined} aria-describedby={describedBy(id, hint, error)} />
+    </FieldShell>
+  );
+}
+
+export function SelectField({ label, hint, error, ...rest }: Common & SelectHTMLAttributes<HTMLSelectElement>) {
+  const id = useId();
+  return (
+    <FieldShell id={id} label={label} hint={hint} error={error}>
+      <div className="relative">
+        <select {...rest} id={id} className="tr-input tr-select" aria-invalid={!!error || undefined} aria-describedby={rest["aria-describedby"] ?? describedBy(id, hint, error)} />
+        <svg aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </div>
     </FieldShell>
   );
 }

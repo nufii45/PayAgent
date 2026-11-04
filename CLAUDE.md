@@ -9,6 +9,10 @@ consistent-return, charcoal-marketing, centralized-token, accessibility, and nat
 requirements. Read existing project tokens/components before edits and keep business
 logic unchanged. Never silently substitute inspiration skills for this standard.
 
+Form and dialog actions are right-aligned from `sm` up, primary last, using the shared
+`.tr-action-bar` (`--flow` in the page flow). Exceptions: hero and empty-state CTAs, inline
+row actions, and links inside text.
+
 For any component that must work on mobile, also apply
 `.claude/skills/traccoon-responsive/SKILL.md`.
 

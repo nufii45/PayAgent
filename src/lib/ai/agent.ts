@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import type { Currency } from "../currency";
 import { InvoiceProposal } from "../invoice-schema";
 import { runTool, toolDefinitions, type ToolDeps } from "./tools";
 
@@ -11,6 +12,8 @@ export type AgentInput = {
   turns: string[];
   /** Optional screenshot as a data URL (F6). */
   imageDataUrl?: string;
+  /** The workspace's preferred currency, used when nothing names one. */
+  preferredCurrency?: Currency;
 };
 
 export type AgentResult =
@@ -23,7 +26,7 @@ const MAX_TOOL_ROUNDS = 5;
 const WEEKDAY = new Intl.DateTimeFormat("en-PH", { weekday: "long", timeZone: "Asia/Manila" });
 const DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" });
 
-export function systemPrompt(now: Date) {
+export function systemPrompt(now: Date, preferredCurrency: Currency = "PHP") {
   return `You are PayAgent, an invoicing assistant for freelancers and small businesses in the Philippines.
 Today is ${WEEKDAY.format(now)}, ${DATE.format(now)} (Asia/Manila).
 
@@ -51,7 +54,7 @@ When done, reply with ONLY a JSON object, no prose, no code fences:
 - amountText is the amount exactly as the user wrote it (e.g. "2.5k", "tatlong libong piso"). Amounts in words are valid: pass them to parse_amount as written. Only mark amount missing if parse_amount fails on it.
 - dueDateToken is one of: today, tomorrow, in_<n>_days, this_<weekday>, next_<weekday>, end_of_month, absolute:YYYY-MM-DD.
 - If anything required is missing or unclear, leave it null, list it in missingFields, and set question to ONE short question in the user's language. Never guess.
-- Default currency is PHP unless the user clearly says dollars.`;
+- currency is the one the user or the screenshot clearly names (₱, PHP, pesos or piso; $, USD or dollars). If none is named, use ${preferredCurrency}. Never convert amounts.`;
 }
 
 /** The user turn sent when there is a screenshot but no typed message. */
@@ -89,7 +92,7 @@ export async function runInvoiceAgent(
   if (input.imageDataUrl) userContent.push({ type: "image_url", image_url: { url: input.imageDataUrl } });
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt(deps.now) },
+    { role: "system", content: systemPrompt(deps.now, input.preferredCurrency) },
     { role: "user", content: userContent },
     ...answers.map((a) => ({ role: "user" as const, content: `Answer to your question: ${a}` })),
   ];

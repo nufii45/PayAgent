@@ -2,9 +2,11 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db";
-import { agentRequests, analysisVersions, auditEvents, evidenceSources, investigations } from "@/db/schema";
+import { agentRequests, analysisVersions, auditEvents, evidenceSources, investigations, workspaces } from "@/db/schema";
+import { pickCurrency, type Currency } from "./currency";
 import { resolveDueDate } from "./dates";
 import type { InvoiceDraft } from "./invoice-schema";
+import type { Preferences } from "./preferences";
 import type { EvidenceInput, ExtractResult } from "./investigation/extract";
 import { reconcile, type Analysis, type Corrections } from "./investigation/reconcile";
 import type { Extraction } from "./investigation/schema";
@@ -128,8 +130,10 @@ export type VersionRow = typeof analysisVersions.$inferSelect & { analysis: Anal
 export async function getInvestigation(db: Db, ws: string, id: string) {
   const [inv] = await db.select().from(investigations).where(own(ws, id));
   if (!inv) return null;
-  const evidence = await db.select().from(evidenceSources).where(eq(evidenceSources.investigationId, id)).orderBy(asc(evidenceSources.position));
-  const versions = (await db.select().from(analysisVersions).where(eq(analysisVersions.investigationId, id)).orderBy(asc(analysisVersions.version))) as VersionRow[];
+  const [evidence, versions] = await Promise.all([
+    db.select().from(evidenceSources).where(eq(evidenceSources.investigationId, id)).orderBy(asc(evidenceSources.position)),
+    db.select().from(analysisVersions).where(eq(analysisVersions.investigationId, id)).orderBy(asc(analysisVersions.version)) as unknown as Promise<VersionRow[]>,
+  ]);
   return { investigation: { ...inv, corrections: inv.corrections as Corrections }, evidence, versions };
 }
 
@@ -184,11 +188,14 @@ export async function analyse(db: Db, ws: string, investigationId: string, trigg
     };
   }
 
+  // Later versions keep the first version's default, so changing the preference never relabels an investigation.
+  const preferred = latest ? (latest.analysis?.currency ?? "PHP") : ((await db.select({ preferences: workspaces.preferences }).from(workspaces).where(eq(workspaces.id, ws)))[0]?.preferences as Preferences | undefined)?.currency;
   const analysis = reconcile(
     extraction,
     used.map((u) => ({ id: u.eid, label: u.label })),
     investigation.corrections,
     now,
+    preferred,
   );
 
   const version = await db.transaction(async (tx) => {
@@ -236,22 +243,29 @@ export async function deleteInvestigation(db: Db, ws: string, investigationId: s
 }
 
 /** Build an invoice draft from what the analysis supports. Unsupported items are left out and listed. */
-export function draftFromAnalysis(analysis: Analysis, now = new Date()) {
+export function draftFromAnalysis(
+  analysis: Analysis,
+  now = new Date(),
+  { preferred = "PHP" }: { preferred?: Currency } = {},
+) {
   const decisions = new Map(analysis.findings.map((f) => [f.id, f.decision]));
   const included = analysis.items.filter(
     (i) => (i.status === "agreed" || i.status === "change_proposed") && i.agreedCentavos != null && !["rejected", "unresolved"].includes(decisions.get(`item:${i.key}`) ?? ""),
   );
   const excluded = analysis.items.filter((i) => !included.includes(i) && i.status !== "rejected" && i.status !== "withdrawn");
   const fallbackDue = resolveDueDate("in_7_days", now);
+  // The same currency the investigation page shows for these items.
+  const { currency, conflict } = pickCurrency([[...new Set(included.map((i) => i.currency ?? "PHP"))]], preferred);
   const draft: InvoiceDraft = {
     clientName: analysis.summary.clientName ?? "",
-    currency: "PHP",
+    currency,
     items: included.map((i) => ({ description: i.label.charAt(0).toUpperCase() + i.label.slice(1), amountCentavos: i.agreedCentavos! })),
     totalCentavos: included.reduce((s, i) => s + i.agreedCentavos!, 0),
     dueDate: analysis.summary.dueDate ?? (fallbackDue.ok ? fallbackDue.date : ""),
     notes: null,
   };
   const warnings: string[] = [];
+  if (conflict) warnings.push(`The agreed amounts name both pesos and dollars. ${currency} is filled in; check the currency below.`);
   if (!analysis.summary.clientName) warnings.push("No client name was visible. Enter it below.");
   if (!analysis.summary.dueDate) warnings.push("No due date was agreed in the conversation. 7 days from today is filled in; change it if needed.");
   for (const i of excluded) warnings.push(`Left out: ${i.label} (${i.status.replace("_", " ")}).`);
