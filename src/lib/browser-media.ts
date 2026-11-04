@@ -26,6 +26,15 @@ export async function toTranscribableWav(blob: Blob): Promise<{ wav: Uint8Array;
   }
 }
 
+/** The image files in a paste, renamed from the browser's "image.png" and numbered from `first`. */
+export function clipboardImages(data: Pick<DataTransfer, "items" | "files">, first: number): File[] {
+  const isImage = (type: string) => type.startsWith("image/");
+  const fromItems = [...data.items].flatMap((i) => (i.kind === "file" && isImage(i.type) ? (i.getAsFile() ?? []) : []));
+  // Browsers can list one image in both, so only fall back to files when items has none.
+  const images = fromItems.length ? fromItems : [...data.files].filter((f) => isImage(f.type));
+  return images.map((f, i) => new File([f], `Pasted screenshot ${first + i}.${f.type.split("/")[1]}`, { type: f.type }));
+}
+
 /** Downscale a screenshot so its longest side is at most 1600px and return it as a data URL. */
 export async function shrinkImage(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);

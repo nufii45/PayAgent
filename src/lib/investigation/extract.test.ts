@@ -1,5 +1,6 @@
+import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
-import { extractConversation } from "./extract";
+import { extractConversation, modelFailureMessage } from "./extract";
 
 const reply = (content: string) => ({ choices: [{ message: { content } }] });
 
@@ -25,5 +26,23 @@ describe("extractConversation", () => {
     const r = await extractConversation({ chat: { completions: { create } } } as never, "m", { evidence: [] });
     expect(create).toHaveBeenCalledTimes(2);
     expect(r.ok).toBe(false);
+  });
+
+  it("gives the call more than the client's 30 s default, but stays under the page's 120 s limit", async () => {
+    const create = vi.fn().mockResolvedValue(reply('{"messages":[],"events":[]}'));
+    await extractConversation({ chat: { completions: { create } } } as never, "m", { evidence: [] });
+    const options = create.mock.calls[0][1];
+    expect(options.timeout).toBeGreaterThan(60_000);
+    expect(options.timeout).toBeLessThan(120_000);
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("modelFailureMessage", () => {
+  it("only reports a timeout for a timeout", () => {
+    expect(modelFailureMessage(new OpenAI.APIConnectionTimeoutError())).toContain("in time");
+    expect(modelFailureMessage(new OpenAI.APIUserAbortError())).toContain("in time");
+    expect(modelFailureMessage(new OpenAI.AuthenticationError(401, undefined, "bad key", new Headers()))).not.toContain("in time");
+    expect(modelFailureMessage(new Error("boom"))).not.toContain("in time");
   });
 });

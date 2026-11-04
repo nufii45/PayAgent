@@ -1,4 +1,4 @@
-import type OpenAI from "openai";
+import OpenAI from "openai";
 import { extractJson } from "../ai/agent";
 import { EVENT_TYPES, Extraction } from "./schema";
 
@@ -9,6 +9,9 @@ export type EvidenceInput =
 export type ExtractResult =
   | { ok: true; extraction: Extraction; model: string; latencyMs: number; retried: boolean }
   | { ok: false; error: string; model: string; latencyMs: number };
+
+// A reading takes 20 to 55 s, well past the client's 30 s default. Total for all attempts, kept under the pages' 120 s maxDuration.
+const BUDGET_MS = 105_000;
 
 const WEEKDAY = new Intl.DateTimeFormat("en-PH", { weekday: "long", timeZone: "Asia/Manila" });
 const DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" });
@@ -48,6 +51,11 @@ Rules:
 
 type ChatClient = Pick<OpenAI, "chat">;
 
+/** What to tell the user when the model call throws. Only timeouts should claim to be timeouts. */
+export function modelFailureMessage(err: unknown) {
+  return err instanceof OpenAI.APIUserAbortError || err instanceof OpenAI.APIConnectionTimeoutError ? "The AI model didn't respond in time." : "The AI model couldn't answer right now.";
+}
+
 export async function extractConversation(
   client: ChatClient,
   model: string,
@@ -73,7 +81,9 @@ export async function extractConversation(
   ];
   let retried = false;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await client.chat.completions.create({ model, messages, temperature: 0 });
+    const left = Math.max(1, BUDGET_MS - (Date.now() - started));
+    // The signal caps the client's own retry too, which stays useful for quick 5xx failures.
+    const res = await client.chat.completions.create({ model, messages, temperature: 0 }, { timeout: left, signal: AbortSignal.timeout(left) });
     const reply = res.choices[0]?.message?.content ?? "";
     let reason: string;
     try {

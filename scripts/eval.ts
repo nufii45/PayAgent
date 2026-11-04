@@ -44,7 +44,7 @@ async function main() {
     const problems: string[] = [];
     if (!run.ok) problems.push(run.error);
     else {
-      const r = proposalToDraft(run.proposal, now);
+      const r = proposalToDraft(run.proposal, now, { turns: c.input ? [c.input] : [], hasImage: !!imageDataUrl });
       const status = r.status === "needs_confirmation" ? "ready" : r.status;
       if (status !== c.expect.status) problems.push(`status ${r.status}, expected ${c.expect.status}`);
       if ("draft" in r) {

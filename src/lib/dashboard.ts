@@ -1,6 +1,7 @@
 // Dashboard figures, derived only from stored workspace records. Pure functions so they can be tested.
-import { diffAnalyses, type Analysis } from "./investigation/reconcile";
-import { formatPeso } from "./money";
+import type { Currency } from "./currency";
+import { diffAnalyses, totalsOf, type Analysis } from "./investigation/reconcile";
+import { formatMoney } from "./money";
 
 export type InvestigationRow = {
   id: string;
@@ -15,6 +16,13 @@ export type InvestigationRow = {
 };
 export type InvoiceRow = { id: string; number: string; clientName: string; amountCentavos: number; currency: "PHP" | "USD"; status: string; investigationId: string | null };
 export type DraftRow = { id: string; investigationId: string | null; draft: { clientName: string; totalCentavos: number; currency: "PHP" | "USD" }; createdAt: Date };
+
+export type ReceivableTotals = { currency: Currency; agreed: number; disputed: number; claimed: number; promised: number };
+
+/** One amount per currency, as text. Empty when none of them has any. */
+export function receivableText(totals: ReceivableTotals[], field: "agreed" | "disputed" | "claimed" | "promised") {
+  return totals.filter((t) => t[field] > 0).map((t) => formatMoney(t[field], t.currency)).join(" and ");
+}
 
 export type InvestigationStatus = "Analyzing" | "Analysis failed" | "Not analysed" | "Needs clarification" | "Ready for review" | "Up to date";
 
@@ -52,21 +60,24 @@ export function buildDashboard(input: { investigations: InvestigationRow[]; invo
   const invoicedInvestigations = new Set(input.invoices.filter((i) => i.status !== "void" && i.investigationId).map((i) => i.investigationId!));
   const analysed = input.investigations.filter((r) => r.latest?.analysis);
 
-  // Potential receivables: agreed amounts from investigations not yet turned into an invoice. Investigation
-  // amounts are read as pesos. Disputed amounts and payment claims are shown beside the figure, never netted silently.
+  // Potential receivables: agreed amounts from investigations not yet turned into an invoice, per currency.
+  // Disputed amounts and payment claims are shown beside the figure, never netted silently.
   const open = analysed.filter((r) => !invoicedInvestigations.has(r.id));
-  const receivables = open.reduce(
-    (acc, r) => {
-      const s = r.latest!.analysis!.summary;
-      acc.agreed += s.agreedTotalCentavos - s.verifiedCentavos;
-      acc.disputed += s.disputedCentavos;
-      acc.claimed += s.claimedCentavos;
-      acc.promised += s.promisedCentavos;
-      if (s.agreedTotalCentavos > 0) acc.count++;
-      return acc;
-    },
-    { agreed: 0, disputed: 0, claimed: 0, promised: 0, count: 0 },
-  );
+  const byCurrency = new Map<Currency, ReceivableTotals>();
+  for (const r of open) {
+    for (const t of totalsOf(r.latest!.analysis!)) {
+      const cur = byCurrency.get(t.currency) ?? { currency: t.currency, agreed: 0, disputed: 0, claimed: 0, promised: 0 };
+      cur.agreed += t.agreed;
+      cur.disputed += t.disputed;
+      cur.claimed += t.claimed;
+      cur.promised += t.promised;
+      byCurrency.set(t.currency, cur);
+    }
+  }
+  const receivables = {
+    count: open.filter((r) => r.latest!.analysis!.summary.agreedTotalCentavos > 0).length,
+    totals: [...byCurrency.values()].filter((t) => t.agreed || t.disputed || t.claimed || t.promised).sort((a, b) => a.currency.localeCompare(b.currency)),
+  };
 
   // Approved invoices not marked paid or cancelled, per currency (never added across currencies).
   const awaiting = new Map<"PHP" | "USD", { count: number; total: number }>();
@@ -87,7 +98,7 @@ export function buildDashboard(input: { investigations: InvestigationRow[]; invo
     }
     const recentlyChanged = r.latestTrigger === "new_evidence" && r.previous && r.latestAt && now.getTime() - new Date(r.latestAt).getTime() < 3 * 86_400_000;
     if (recentlyChanged) {
-      const changes = diffAnalyses(r.previous!, a, formatPeso).filter((c) => c.kind !== "review");
+      const changes = diffAnalyses(r.previous!, a, formatMoney).filter((c) => c.kind !== "review");
       if (changes.length)
         attention.push({ key: `${r.id}:changed`, issue: `New evidence changed ${changes.length === 1 ? changes[0].title.toLowerCase() : `${changes.length} findings`}.`, investigation: ref, status: "Changed by new evidence", next: "See what changed and why", href: `/investigations/${r.id}` });
     }
@@ -124,7 +135,7 @@ export function buildDashboard(input: { investigations: InvestigationRow[]; invo
   const withPromises = open.filter((r) => r.latest!.analysis!.summary.promisedCentavos > 0).length;
   if (withPromises) insights.push(`${withPromises} investigation${withPromises === 1 ? " includes" : "s include"} a promised payment. A promise isn't counted as paid.`);
   const disputed = open.filter((r) => r.latest!.analysis!.summary.disputedCentavos > 0).length;
-  if (disputed) insights.push(`${disputed} agreement${disputed === 1 ? " has" : "s have"} a disputed amount, totalling ${formatPeso(receivables.disputed)}.`);
+  if (disputed) insights.push(`${disputed} agreement${disputed === 1 ? " has" : "s have"} a disputed amount, totalling ${receivableText(receivables.totals, "disputed")}.`);
   if (input.drafts.length) insights.push(`${input.drafts.length} invoice draft${input.drafts.length === 1 ? " is" : "s are"} waiting for your approval.`);
 
   return {

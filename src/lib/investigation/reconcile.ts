@@ -1,6 +1,7 @@
 // Turns what the model read into an analysis. All judgement about what was agreed,
 // what was paid and what conflicts lives here, in code, so it is testable and repeatable.
-import { parseAmount } from "../money";
+import { currenciesInAmounts, currenciesInText, pickCurrency, type Currency } from "../currency";
+import { formatMoney, parseAmount } from "../money";
 import { resolveDueDate, type IsoDate } from "../dates";
 import type { EventType, ExtractedEvent, ExtractedMessage, Extraction } from "./schema";
 
@@ -53,6 +54,8 @@ export type Item = {
   explanation: string;
   eventIds: string[];
   messageIds: string[];
+  /** Absent on analyses stored before currencies were tracked. Those are shown as pesos, as they always were. */
+  currency?: Currency;
 };
 
 export type TimelineEntry = {
@@ -66,6 +69,7 @@ export type TimelineEntry = {
   speaker: Speaker;
   messageIds: string[];
   evidenceIds: string[];
+  currency?: Currency;
 };
 
 export type Finding = {
@@ -78,12 +82,18 @@ export type Finding = {
   needsReview: boolean;
   decision: "confirmed" | "rejected" | "unresolved" | null;
   messageIds: string[];
+  currency?: Currency;
 };
 
 export type RecommendedAction = "clarify" | "invoice" | "follow_up" | "save_summary";
 
+/** What a conversation adds up to in one currency. Amounts in different currencies are never added together. */
+export type CurrencyTotals = { currency: Currency; agreed: number; disputed: number; promised: number; claimed: number; balance: number };
+
 export type Summary = {
   clientName: string | null;
+  /** Show amounts through `totals`. The fields below add across currencies when a conversation mixes them. */
+  totals?: CurrencyTotals[];
   agreedTotalCentavos: number;
   /** Agreed amounts the user confirmed or that have explicit acceptance. */
   disputedCentavos: number;
@@ -107,7 +117,23 @@ export type Analysis = {
   needsSpeakerHelp: boolean;
   /** Message ids whose screenshot boxes passed the sanity checks. */
   trustedBoxes: string[];
+  /** What unmarked amounts are read as: the currency the conversation names, or else the workspace preference. */
+  currency?: Currency;
+  mixedCurrency?: boolean;
 };
+
+export type MoneyFormat = (centavos: number, currency?: Currency) => string;
+
+export function totalsOf(a: Analysis): CurrencyTotals[] {
+  const s = a.summary;
+  return s.totals ?? [{ currency: "PHP", agreed: s.agreedTotalCentavos, disputed: s.disputedCentavos, promised: s.promisedCentavos, claimed: s.claimedCentavos, balance: s.balanceIfClaimsTrueCentavos }];
+}
+
+/** One total per currency, as text: "₱5,000.00 and $20.00". */
+export function moneyText(a: Analysis, field: Exclude<keyof CurrencyTotals, "currency">, format: MoneyFormat) {
+  const found = totalsOf(a).filter((t) => t[field] > 0);
+  return found.length ? found.map((t) => format(t[field], t.currency)).join(" and ") : format(0, a.currency ?? "PHP");
+}
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
@@ -122,7 +148,7 @@ export function itemKey(label: string) {
 
 const PROPOSALS: EventType[] = ["offer", "counteroffer"];
 
-export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corrections: Corrections = {}, now = new Date()): Analysis {
+export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corrections: Corrections = {}, now = new Date(), preferred: Currency = "PHP"): Analysis {
   const evidenceOrder = new Map(evidence.map((e, i) => [e.id, i]));
   const issues: Finding[] = [];
 
@@ -157,7 +183,7 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
   }
 
   // 2. Events: keep those that point at real messages, order by their first message, drop events built only on duplicates.
-  type Ev = ExtractedEvent & { order: number; speaker: Speaker; amount: number | null; key: string | null };
+  type Ev = ExtractedEvent & { order: number; speaker: Speaker; amount: number | null; key: string | null; named: Currency[] };
   const events: Ev[] = [];
   for (const e of extraction.events) {
     const msgs = e.messageIds.map((id) => byId.get(id)).filter((m): m is Message => !!m);
@@ -176,9 +202,16 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
       speaker: msgs[0].speaker,
       amount,
       key: e.item ? itemKey(e.item) : null,
+      // Same rule as a new invoice: the amount's own mark, then the words around it.
+      named: amount == null ? [] : currenciesInAmounts([e.amountText]).length ? currenciesInAmounts([e.amountText]) : currenciesInText(msgs.map((m) => m.text)),
     });
   }
   events.sort((a, b) => a.order - b.order);
+
+  const { currency: defaultCurrency, conflict: mixedCurrency } = pickCurrency([[...new Set(events.flatMap((e) => e.named))]], preferred);
+  if (mixedCurrency) {
+    issues.push({ ...issue("issue:currency", "This conversation mentions both pesos and dollars", "Check the amounts."), messageIds: [...new Set(events.filter((e) => e.named.length).flatMap((e) => e.messageIds))] });
+  }
 
   // Acceptances and rejections without an item refer to the latest priced item.
   let lastPricedKey: string | null = null;
@@ -192,6 +225,8 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
   const timeline: TimelineEntry[] = [];
   let promised = 0;
   let claimed = 0;
+  const promisedBy = new Map<Currency, number>();
+  const claimedBy = new Map<Currency, number>();
   let dueToken: { token: string; messageIds: string[] } | null = null;
   const paymentMsgs = { promised: [] as string[], claimed: [] as string[] };
 
@@ -203,6 +238,9 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
       item.eventIds.push(e.id);
       item.messageIds.push(...e.messageIds);
     }
+    const own = e.named.length === 1 ? e.named[0] : undefined;
+    if (item && own) item.currency = own;
+    const currency = own ?? item?.currency ?? defaultCurrency;
 
     switch (e.type) {
       case "offer":
@@ -299,12 +337,18 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
         effect = "Deposit requested";
         break;
       case "payment_promise":
-        if (e.amount != null) promised += e.amount;
+        if (e.amount != null) {
+          promised += e.amount;
+          promisedBy.set(currency, (promisedBy.get(currency) ?? 0) + e.amount);
+        }
         paymentMsgs.promised.push(...e.messageIds);
         effect = "Promise to pay (not a payment)";
         break;
       case "payment_claim":
-        if (e.amount != null) claimed += e.amount;
+        if (e.amount != null) {
+          claimed += e.amount;
+          claimedBy.set(currency, (claimedBy.get(currency) ?? 0) + e.amount);
+        }
         paymentMsgs.claimed.push(...e.messageIds);
         effect = "Says they paid (not verified)";
         break;
@@ -324,6 +368,7 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
       speaker: e.speaker,
       messageIds: e.messageIds,
       evidenceIds: [...new Set(e.messageIds.map((id) => byId.get(id)!.evidence))],
+      currency,
     });
   }
 
@@ -358,10 +403,19 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
       needsReview,
       decision: null,
       messageIds: [...new Set(item.messageIds)],
+      currency: item.currency ?? defaultCurrency,
     });
   }
-  if (promised) findings.push({ id: "payment:promised", kind: "payment", title: "Payment promised", detail: "A promise to pay. Not a payment.", amountCentavos: promised, classification: "conversation", needsReview: false, decision: null, messageIds: paymentMsgs.promised });
-  if (claimed) findings.push({ id: "payment:claimed", kind: "payment", title: "Client says they paid", detail: "A claim in the chat, not verified by any receipt or payment provider.", amountCentavos: claimed, classification: "unresolved", needsReview: true, decision: null, messageIds: paymentMsgs.claimed });
+  // A payment finding holds one amount, so two currencies go into its text instead of being added up.
+  const paid = (by: Map<Currency, number>) => (by.size > 1 ? { amountCentavos: null, prefix: `${[...by].map(([c, v]) => formatMoney(v, c)).join(" and ")}. ` } : { amountCentavos: [...by.values()][0] ?? null, currency: [...by.keys()][0], prefix: "" });
+  if (promised) {
+    const { prefix, ...amount } = paid(promisedBy);
+    findings.push({ id: "payment:promised", kind: "payment", title: "Payment promised", detail: `${prefix}A promise to pay. Not a payment.`, ...amount, classification: "conversation", needsReview: false, decision: null, messageIds: paymentMsgs.promised });
+  }
+  if (claimed) {
+    const { prefix, ...amount } = paid(claimedBy);
+    findings.push({ id: "payment:claimed", kind: "payment", title: "Client says they paid", detail: `${prefix}A claim in the chat, not verified by any receipt or payment provider.`, ...amount, classification: "unresolved", needsReview: true, decision: null, messageIds: paymentMsgs.claimed });
+  }
 
   let dueDate: IsoDate | null = null;
   if (dueToken) {
@@ -403,21 +457,41 @@ export function reconcile(extraction: Extraction, evidence: EvidenceRef[], corre
   };
   let agreed = 0;
   let disputed = 0;
+  const byCurrency = new Map<Currency, CurrencyTotals>();
+  const totalFor = (currency: Currency) => {
+    if (!byCurrency.has(currency)) byCurrency.set(currency, { currency, agreed: 0, disputed: 0, promised: 0, claimed: 0, balance: 0 });
+    return byCurrency.get(currency)!;
+  };
   for (const item of items.values()) {
-    if ((item.status === "agreed" || item.status === "change_proposed") && item.agreedCentavos != null && counts(item.key)) agreed += item.agreedCentavos;
-    if (item.status === "disputed" && item.affectedCentavos != null) disputed += item.affectedCentavos;
+    const currency = item.currency ?? defaultCurrency;
+    if ((item.status === "agreed" || item.status === "change_proposed") && item.agreedCentavos != null && counts(item.key)) {
+      agreed += item.agreedCentavos;
+      totalFor(currency).agreed += item.agreedCentavos;
+    }
+    if (item.status === "disputed" && item.affectedCentavos != null) {
+      disputed += item.affectedCentavos;
+      totalFor(currency).disputed += item.affectedCentavos;
+    }
   }
+  for (const [currency, v] of promisedBy) totalFor(currency).promised += v;
+  for (const [currency, v] of claimedBy) totalFor(currency).claimed += v;
+  totalFor(defaultCurrency);
+  const totals = [...byCurrency.values()].filter((t, _, all) => all.length === 1 || t.agreed || t.disputed || t.promised || t.claimed).sort((a, b) => a.currency.localeCompare(b.currency));
+  for (const t of totals) t.balance = Math.max(0, t.agreed - t.claimed);
   const reviewCount = findings.filter((f) => f.needsReview).length;
   const recommendedAction: RecommendedAction =
-    reviewCount > 0 || agreed === 0 ? "clarify" : claimed >= agreed ? "save_summary" : promised > 0 ? "follow_up" : "invoice";
+    reviewCount > 0 || agreed === 0 ? "clarify" : totals.every((t) => t.claimed >= t.agreed) ? "save_summary" : promised > 0 ? "follow_up" : "invoice";
 
   return {
     messages,
-    items: [...items.values()].map((i) => ({ key: i.key, label: i.label, status: i.status, agreedCentavos: i.agreedCentavos, proposedCentavos: i.proposedCentavos, affectedCentavos: i.affectedCentavos, classification: i.classification, explanation: i.explanation, eventIds: i.eventIds, messageIds: [...new Set(i.messageIds)] })),
+    items: [...items.values()].map((i) => ({ key: i.key, label: i.label, status: i.status, agreedCentavos: i.agreedCentavos, proposedCentavos: i.proposedCentavos, affectedCentavos: i.affectedCentavos, classification: i.classification, explanation: i.explanation, eventIds: i.eventIds, messageIds: [...new Set(i.messageIds)], currency: i.currency ?? defaultCurrency })),
     timeline,
     findings,
+    currency: defaultCurrency,
+    mixedCurrency,
     summary: {
       clientName: corrections.clientName ?? extraction.clientName,
+      totals,
       agreedTotalCentavos: agreed,
       disputedCentavos: disputed,
       promisedCentavos: promised,
@@ -509,19 +583,19 @@ function trustedBoxes(messages: Message[]): string[] {
 /** What changed between two analysis versions, worked out by code. */
 export type Change = { kind: "item" | "total" | "payment" | "review"; title: string; before: string | null; after: string | null; messageIds: string[] };
 
-export function diffAnalyses(prev: Analysis, next: Analysis, format: (c: number) => string): Change[] {
+export function diffAnalyses(prev: Analysis, next: Analysis, format: MoneyFormat): Change[] {
   const changes: Change[] = [];
   const prevItems = new Map(prev.items.map((i) => [i.key, i]));
   const describe = (i: Item) => {
     const amount = i.agreedCentavos ?? i.affectedCentavos ?? i.proposedCentavos;
-    return `${STATUS_LABEL[i.status]}${amount != null ? `, ${format(amount)}` : ""}`;
+    return `${STATUS_LABEL[i.status]}${amount != null ? `, ${format(amount, i.currency)}` : ""}`;
   };
   for (const item of next.items) {
     const before = prevItems.get(item.key);
     const label = item.label.charAt(0).toUpperCase() + item.label.slice(1);
     const newMsgs = item.messageIds.filter((id) => !prev.messages.some((m) => m.key === next.messages.find((x) => x.id === id)?.key));
     if (!before) changes.push({ kind: "item", title: `${label} appeared`, before: null, after: describe(item), messageIds: newMsgs });
-    else if (before.status !== item.status || before.agreedCentavos !== item.agreedCentavos || before.proposedCentavos !== item.proposedCentavos) {
+    else if (before.status !== item.status || before.agreedCentavos !== item.agreedCentavos || before.proposedCentavos !== item.proposedCentavos || (before.currency ?? "PHP") !== (item.currency ?? "PHP")) {
       changes.push({ kind: "item", title: label, before: describe(before), after: describe(item), messageIds: newMsgs });
     }
     prevItems.delete(item.key);
@@ -531,9 +605,14 @@ export function diffAnalyses(prev: Analysis, next: Analysis, format: (c: number)
   }
   const s0 = prev.summary;
   const s1 = next.summary;
-  if (s0.agreedTotalCentavos !== s1.agreedTotalCentavos) changes.push({ kind: "total", title: "Agreed total", before: format(s0.agreedTotalCentavos), after: format(s1.agreedTotalCentavos), messageIds: [] });
-  if (s0.promisedCentavos !== s1.promisedCentavos) changes.push({ kind: "payment", title: "Payments promised", before: format(s0.promisedCentavos), after: format(s1.promisedCentavos), messageIds: [] });
-  if (s0.claimedCentavos !== s1.claimedCentavos) changes.push({ kind: "payment", title: "Payments the client says they made", before: format(s0.claimedCentavos), after: format(s1.claimedCentavos), messageIds: [] });
+  const total = (kind: "total" | "payment", title: string, field: "agreed" | "promised" | "claimed") => {
+    const before = moneyText(prev, field, format);
+    const after = moneyText(next, field, format);
+    if (before !== after) changes.push({ kind, title, before, after, messageIds: [] });
+  };
+  total("total", "Agreed total", "agreed");
+  total("payment", "Payments promised", "promised");
+  total("payment", "Payments the client says they made", "claimed");
   if (s0.reviewCount !== s1.reviewCount) changes.push({ kind: "review", title: "Items needing your review", before: String(s0.reviewCount), after: String(s1.reviewCount), messageIds: [] });
   return changes;
 }

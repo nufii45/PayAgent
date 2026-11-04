@@ -1,10 +1,10 @@
 import Link from "next/link";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, MouseEventHandler, ReactNode } from "react";
 
-type Variant = "primary" | "secondary";
+type Variant = "primary" | "secondary" | "danger";
 
 function classes(variant: Variant, extra?: string) {
-  return ["tr-button", variant === "secondary" && "tr-button--secondary", extra].filter(Boolean).join(" ");
+  return ["tr-button", variant !== "primary" && `tr-button--${variant}`, extra].filter(Boolean).join(" ");
 }
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -32,14 +32,16 @@ export function ButtonLink({
   variant = "primary",
   children,
   className,
+  onClick,
 }: {
   href: string;
   variant?: Variant;
   children: ReactNode;
   className?: string;
+  onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
   return (
-    <Link href={href} className={classes(variant, className)}>
+    <Link href={href} className={classes(variant, className)} onClick={onClick}>
       {children}
     </Link>
   );

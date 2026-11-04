@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { approveDraft, rejectDraft } from "@/app/actions";
 import { Button } from "@/components/ui/Button";
-import { TextAreaField, TextField } from "@/components/ui/Field";
+import { SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { formatDate } from "@/lib/dates";
 import type { InvoiceDraft } from "@/lib/invoice-schema";
 import { formatMoney, parseAmount } from "@/lib/money";
@@ -23,6 +23,7 @@ export function ReviewForm({
 }) {
   const [clientName, setClientName] = useState(draft.clientName);
   const [items, setItems] = useState(draft.items.map((i) => ({ description: i.description, amountText: toAmountText(i.amountCentavos) })));
+  const [currency, setCurrency] = useState(draft.currency);
   const [dueDate, setDueDate] = useState(draft.dueDate);
   const [notes, setNotes] = useState(draft.notes ?? "");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -40,7 +41,7 @@ export function ReviewForm({
     e.preventDefault();
     setFormError(null);
     startApprove(async () => {
-      const res = await approveDraft(requestId, { clientName, currency: draft.currency, items, dueDate, notes: notes || null });
+      const res = await approveDraft(requestId, { clientName, currency, items, dueDate, notes: notes || null });
       if (res?.errors) setErrors(res.errors);
       if (res?.error) setFormError(res.error);
     });
@@ -63,7 +64,13 @@ export function ReviewForm({
       <TextField label="Client" value={clientName} onChange={(e) => setClientName(e.target.value)} error={errors.clientName} />
 
       <fieldset className="flex flex-col gap-4">
-        <legend className="mb-2 font-bold">Work and amounts ({draft.currency})</legend>
+        <legend className="mb-2 font-bold">Work and amounts ({currency})</legend>
+        <div className="sm:max-w-xs">
+          <SelectField label="Currency" hint="Changing this doesn't convert the amounts." value={currency} onChange={(e) => setCurrency(e.target.value as typeof currency)} error={errors.currency}>
+            <option value="PHP">Philippine peso (PHP)</option>
+            <option value="USD">US dollar (USD)</option>
+          </SelectField>
+        </div>
         {items.map((item, idx) => (
           <div key={idx} className="grid gap-3 sm:grid-cols-[1fr_10rem]">
             <TextField
@@ -82,7 +89,7 @@ export function ReviewForm({
           </div>
         ))}
         <p className="text-lg font-extrabold" aria-live="polite">
-          Total: {total != null ? formatMoney(total, draft.currency) : "check the amounts above"}
+          Total: {total != null ? formatMoney(total, currency) : "check the amounts above"}
         </p>
       </fieldset>
 
@@ -101,15 +108,15 @@ export function ReviewForm({
           {formError}
         </p>
       )}
-      <div className="flex flex-wrap gap-3">
-        <Button type="submit" loading={approving} loadingLabel="Saving invoice…" disabled={discarding}>
-          Approve and save invoice
-        </Button>
+      <div className="tr-action-bar tr-action-bar--flow">
         <Button type="button" variant="secondary" onClick={discard} loading={discarding} loadingLabel="Discarding…" disabled={approving}>
           Discard draft
         </Button>
+        <Button type="submit" loading={approving} loadingLabel="Saving invoice…" disabled={discarding}>
+          Approve and save invoice
+        </Button>
       </div>
-      <p className="text-sm text-muted">Nothing is saved as an invoice until you approve it.</p>
+      <p className="text-sm text-muted sm:text-right">Nothing is saved as an invoice until you approve it.</p>
     </form>
   );
 }

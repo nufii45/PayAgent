@@ -7,10 +7,12 @@ import { ReviewForm } from "@/app/new/ReviewForm";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { TextField } from "@/components/ui/Field";
+import { StatusLabel, type StatusTone } from "@/components/ui/StatusLabel";
 import { formatDate } from "@/lib/dates";
 import type { InvoiceDraft } from "@/lib/invoice-schema";
 import type { Analysis, Change, Classification, Finding, Message } from "@/lib/investigation/reconcile";
-import { formatPeso, parseAmount } from "@/lib/money";
+import { moneyText } from "@/lib/investigation/reconcile";
+import { formatMoney, parseAmount } from "@/lib/money";
 import { EvidencePicker, Working, type PickedEvidence } from "./EvidencePicker";
 
 export type EvidenceRow = { id: string; label: string; kind: "image" | "text"; imageDataUrl: string | null; textContent: string | null };
@@ -39,16 +41,16 @@ const TRIGGER: Record<string, string> = {
   removed_evidence: "after removing evidence",
 };
 
-const CLASS_LABEL: Record<Classification, { label: string; className: string }> = {
-  conversation: { label: "Backed by the chat", className: "border-success bg-success-bg text-success" },
-  user: { label: "Confirmed by you", className: "border-success bg-success-bg text-success" },
-  inferred: { label: "Inferred, check it", className: "border-warning bg-warning-bg text-warning" },
-  unresolved: { label: "Unresolved", className: "border-danger bg-danger-bg text-danger" },
+const CLASS_LABEL: Record<Classification, { label: string; tone: StatusTone }> = {
+  conversation: { label: "Backed by the chat", tone: "success" },
+  user: { label: "Confirmed by you", tone: "success" },
+  inferred: { label: "Inferred, check it", tone: "warning" },
+  unresolved: { label: "Unresolved", tone: "danger" },
 };
 
 function Badge({ c }: { c: Classification }) {
   const s = CLASS_LABEL[c];
-  return <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-sm font-bold ${s.className}`}>{s.label}</span>;
+  return <StatusLabel tone={s.tone}>{s.label}</StatusLabel>;
 }
 
 export function InvestigationView(p: Props) {
@@ -151,13 +153,13 @@ export function InvestigationView(p: Props) {
           <Card className="flex flex-col gap-4">
             <h2 className="text-xl font-extrabold">Summary{s.clientName ? ` with ${s.clientName}` : ""}</h2>
             <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-              <Stat label="Agreed total (backed by the chat)" value={formatPeso(s.agreedTotalCentavos)} strong />
+              <Stat label="Agreed total (backed by the chat)" value={moneyText(a, "agreed", formatMoney)} strong />
               <Stat label="Due" value={s.dueDate ? formatDate(s.dueDate) : "Not agreed"} />
-              <Stat label="Promised by client (not paid)" value={formatPeso(s.promisedCentavos)} />
-              <Stat label="Client says paid (not verified)" value={formatPeso(s.claimedCentavos)} />
-              <Stat label="Verified payments" value={formatPeso(s.verifiedCentavos)} />
-              <Stat label="Balance if the client's claims are true" value={formatPeso(s.balanceIfClaimsTrueCentavos)} />
-              {s.disputedCentavos > 0 && <Stat label="Disputed" value={formatPeso(s.disputedCentavos)} />}
+              <Stat label="Promised by client (not paid)" value={moneyText(a, "promised", formatMoney)} />
+              <Stat label="Client says paid (not verified)" value={moneyText(a, "claimed", formatMoney)} />
+              <Stat label="Verified payments" value={formatMoney(s.verifiedCentavos, a.currency)} />
+              <Stat label="Balance if the client's claims are true" value={moneyText(a, "balance", formatMoney)} />
+              {s.disputedCentavos > 0 && <Stat label="Disputed" value={moneyText(a, "disputed", formatMoney)} />}
             </dl>
             <p className="font-semibold">
               {s.recommendedAction === "clarify" && `Next: ${s.reviewCount} thing${s.reviewCount === 1 ? "" : "s"} need${s.reviewCount === 1 ? "s" : ""} your review before invoicing. Resolve them below, or ask the client.`}
@@ -209,7 +211,7 @@ export function InvestigationView(p: Props) {
                       <span className="font-bold">
                         {i + 1}. {t.title}
                       </span>
-                      {t.amountCentavos != null && <span className="font-bold tabular-nums">{formatPeso(t.amountCentavos)}</span>}
+                      {t.amountCentavos != null && <span className="font-bold tabular-nums">{formatMoney(t.amountCentavos, t.currency)}</span>}
                     </div>
                     <span className="text-sm text-muted">
                       {t.speaker === "you" ? "You" : t.speaker === "client" ? "Client" : "Unknown sender"} · {t.effect}
@@ -245,7 +247,7 @@ export function InvestigationView(p: Props) {
                 <ReviewForm requestId={invoice.requestId} draft={invoice.draft} onDiscarded={() => setInvoice(null)} />
               </div>
             ) : (
-              <div className="flex flex-wrap gap-3">
+              <div className="tr-action-bar tr-action-bar--flow">
                 <Button
                   type="button"
                   disabled={readOnly}
@@ -277,14 +279,16 @@ export function InvestigationView(p: Props) {
                   if (!confirmed) return setError("Tick the box to confirm deletion.");
                   run("Deleting…", () => removeInvestigation(p.id));
                 }}
-                className="flex flex-col items-start gap-3"
+                className="flex flex-col gap-3"
               >
                 <label className="flex items-center gap-2">
                   <input type="checkbox" name="confirm" className="size-5" /> I understand this can&apos;t be undone
                 </label>
-                <Button type="submit" variant="secondary" disabled={pending}>
-                  Delete investigation
-                </Button>
+                <div className="tr-action-bar tr-action-bar--flow">
+                  <Button type="submit" variant="secondary" disabled={pending}>
+                    Delete investigation
+                  </Button>
+                </div>
               </form>
             </Card>
           )}
@@ -359,22 +363,24 @@ export function InvestigationView(p: Props) {
               <h3 className="text-lg font-extrabold">Add evidence and reanalyse</h3>
               <p className="text-sm text-muted">New screenshots are added after the existing ones. PayAgent rereads everything and shows what changed. Your earlier versions are kept.</p>
               <EvidencePicker value={adding} onChange={setAdding} disabled={pending} />
-              <Button
-                type="button"
-                disabled={pending || (!adding.images.length && !adding.text.trim())}
-                onClick={() =>
-                  run(
-                    "Reanalysing with the new evidence…",
-                    () => addEvidenceAndReanalyse(p.id, { images: adding.images.map((x) => x.dataUrl), texts: [adding.text] }),
-                    () => setAdding({ images: [], text: "" }),
-                  )
-                }
-              >
-                Add and reanalyse
-              </Button>
-              <button type="button" className="self-start text-sm font-bold underline" disabled={pending} onClick={() => run("Reanalysing…", () => rerunAnalysis(p.id))}>
-                Reanalyse without new evidence
-              </button>
+              <div className="tr-action-bar tr-action-bar--flow">
+                <button type="button" className="min-h-11 text-sm font-bold underline" disabled={pending} onClick={() => run("Reanalysing…", () => rerunAnalysis(p.id))}>
+                  Reanalyse without new evidence
+                </button>
+                <Button
+                  type="button"
+                  disabled={pending || (!adding.images.length && !adding.text.trim())}
+                  onClick={() =>
+                    run(
+                      "Reanalysing with the new evidence…",
+                      () => addEvidenceAndReanalyse(p.id, { images: adding.images.map((x) => x.dataUrl), texts: [adding.text] }),
+                      () => setAdding({ images: [], text: "" }),
+                    )
+                  }
+                >
+                  Add and reanalyse
+                </Button>
+              </div>
             </Card>
           )}
         </aside>
@@ -403,7 +409,7 @@ function FindingCard({ f, readOnly, onSource, onCorrect }: { f: Finding; readOnl
         <span className="font-bold">{f.title}</span>
         <Badge c={f.classification} />
       </div>
-      {f.amountCentavos != null && <span className="text-lg font-extrabold tabular-nums">{formatPeso(f.amountCentavos)}</span>}
+      {f.amountCentavos != null && <span className="text-lg font-extrabold tabular-nums">{formatMoney(f.amountCentavos, f.currency)}</span>}
       <p className="text-muted">{f.detail}</p>
       {f.decision && <p className="text-sm font-semibold">Your decision: {f.decision}</p>}
       <div className="flex flex-wrap gap-2">
@@ -424,6 +430,12 @@ function FindingCard({ f, readOnly, onSource, onCorrect }: { f: Finding; readOnl
               Mark unresolved
             </button>
           </>
+        )}
+        {/* A real mixed deal has to be clearable, or the investigation could never leave review. */}
+        {!readOnly && f.id === "issue:currency" && !f.decision && (
+          <button type="button" className="tr-button tr-button--secondary min-h-0 px-3 py-1.5 text-sm" onClick={() => onCorrect({ decisions: { [f.id]: "confirmed" } }, "Saving…")}>
+            Confirm
+          </button>
         )}
         {!readOnly && itemKey && (
           <button type="button" className="tr-button tr-button--secondary min-h-0 px-3 py-1.5 text-sm" onClick={() => setFixing((x) => !x)}>

@@ -1,9 +1,10 @@
-import { PrivacyPoints } from "@/components/PrivacyPoints";
+import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
 import { currentWorkspace } from "@/lib/current-workspace";
+import { aiProcessor, hasCurrentPrivacyAck } from "@/lib/privacy";
 import { retentionDays } from "@/lib/session";
-import { Onboarding } from "./Onboarding";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 export const metadata = { title: "Welcome · Traccoon PayAgent" };
 
 export default async function WelcomePage({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
@@ -17,7 +18,7 @@ export default async function WelcomePage({ searchParams }: { searchParams: Prom
           Your workspace and everything in it were deleted. This is a new, empty workspace.
         </p>
       )}
-      <Onboarding initial={ws.preferences} privacy={<PrivacyPoints retentionDays={retentionDays()} />} />
+      <WelcomeFlow facts={{ processor: aiProcessor().short, retentionDays: retentionDays() }} acknowledged={hasCurrentPrivacyAck(ws)} />
     </>
   );
 }
